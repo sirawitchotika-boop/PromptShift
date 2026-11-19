@@ -26,6 +26,8 @@ interface PromptBatchRepository {
 
     fun loadFromRawText(rawText: String?): BatchLoadResult
     fun loadParsedPrompts(prompts: List<String>): BatchLoadResult
+    fun beginStreamingBatch()
+    fun appendStreamedPrompt(prompt: String): Int
     fun markCurrentCopied(): String?
     fun stepPrevious(): Boolean
     fun stepNext(): Boolean
@@ -112,6 +114,29 @@ class DefaultPromptBatchRepository(
         }
         postFeedback("Loaded ${cleaned.size}")
         return BatchLoadResult.Loaded(cleaned.size)
+    }
+
+    override fun beginStreamingBatch() {
+        synchronized(lock) {
+            _batchState.value = PromptBatchState()
+            persistLocked()
+        }
+    }
+
+    override fun appendStreamedPrompt(prompt: String): Int {
+        val cleaned = prompt.trim()
+        if (cleaned.isEmpty()) return _batchState.value.totalCount
+
+        synchronized(lock) {
+            val current = _batchState.value
+            val updatedPrompts = current.prompts + cleaned
+            _batchState.value = current.copy(
+                prompts = updatedPrompts,
+                currentIndex = current.currentIndex.coerceIn(0, updatedPrompts.lastIndex),
+            )
+            persistLocked()
+            return updatedPrompts.size
+        }
     }
 
     override fun markCurrentCopied(): String? {
