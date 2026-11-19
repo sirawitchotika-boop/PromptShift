@@ -26,8 +26,19 @@ data class PromptBatchState(
         else -> "Copy #$displayIndex/$totalCount"
     }
 
+    fun insertButtonLabel(): String = when {
+        isEmpty -> "Tap Load or AI"
+        isCurrentCopied -> "Inserted ✅ #$displayIndex/$totalCount"
+        else -> "Insert #$displayIndex/$totalCount"
+    }
+
     fun collapsedBadgeLabel(): String = if (isEmpty) "•" else displayIndex.toString()
 }
+
+data class ImePrefsState(
+    val replaceMode: Boolean = true,
+    val autoNext: Boolean = false,
+)
 
 data class OverlayUiState(
     val x: Int = 0,

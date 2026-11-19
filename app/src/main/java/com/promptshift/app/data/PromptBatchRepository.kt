@@ -2,6 +2,7 @@ package com.promptshift.app.data
 
 import com.promptshift.app.domain.BatchLoadResult
 import com.promptshift.app.domain.BatchParseResult
+import com.promptshift.app.domain.ImePrefsState
 import com.promptshift.app.domain.OverlayFeedback
 import com.promptshift.app.domain.OverlayUiState
 import com.promptshift.app.domain.PromptBatchParser
@@ -15,13 +16,13 @@ import kotlinx.coroutines.flow.asStateFlow
 import java.util.concurrent.atomic.AtomicLong
 
 /**
- * Single source of truth for prompt batch & floating overlay state.
- * Kept behind an interface so a future Phase 2 (Direct OpenAI-compatible AI API + SSE streaming)
- * can plug in cleanly without changing the parser or floating overlay.
+ * Single source of truth for prompt batch, floating overlay, and Mini-Keyboard state.
+ * Shared live across Main Hub, Floating Bubble, and PromptShift Keyboard.
  */
 interface PromptBatchRepository {
     val batchState: StateFlow<PromptBatchState>
     val overlayState: StateFlow<OverlayUiState>
+    val imePrefs: StateFlow<ImePrefsState>
     val feedbackEvents: SharedFlow<OverlayFeedback>
 
     fun loadFromRawText(rawText: String?): BatchLoadResult
@@ -29,11 +30,14 @@ interface PromptBatchRepository {
     fun beginStreamingBatch()
     fun appendStreamedPrompt(prompt: String): Int
     fun markCurrentCopied(): String?
+    fun markCurrentInserted(autoAdvance: Boolean): String?
     fun stepPrevious(): Boolean
     fun stepNext(): Boolean
     fun clearBatch()
     fun updateOverlayPosition(x: Int, y: Int)
     fun setCollapsed(collapsed: Boolean)
+    fun setImeReplaceMode(replaceMode: Boolean)
+    fun setImeAutoNext(autoNext: Boolean)
     fun postFeedback(message: String, isError: Boolean = false)
 }
 
@@ -46,10 +50,12 @@ class DefaultPromptBatchRepository(
 
     private val _batchState: MutableStateFlow<PromptBatchState>
     private val _overlayState: MutableStateFlow<OverlayUiState>
+    private val _imePrefs: MutableStateFlow<ImePrefsState>
     private val _feedbackEvents = MutableSharedFlow<OverlayFeedback>(extraBufferCapacity = 8)
 
     override val batchState: StateFlow<PromptBatchState>
     override val overlayState: StateFlow<OverlayUiState>
+    override val imePrefs: StateFlow<ImePrefsState>
     override val feedbackEvents: SharedFlow<OverlayFeedback> = _feedbackEvents.asSharedFlow()
 
     init {
@@ -77,10 +83,21 @@ class DefaultPromptBatchRepository(
             OverlayUiState()
         }
 
+        val initialImePrefs = if (saved != null) {
+            ImePrefsState(
+                replaceMode = saved.imeReplaceMode,
+                autoNext = saved.imeAutoNext,
+            )
+        } else {
+            ImePrefsState()
+        }
+
         _batchState = MutableStateFlow(initialBatch)
         _overlayState = MutableStateFlow(initialOverlay)
+        _imePrefs = MutableStateFlow(initialImePrefs)
         batchState = _batchState.asStateFlow()
         overlayState = _overlayState.asStateFlow()
+        imePrefs = _imePrefs.asStateFlow()
     }
 
     override fun loadFromRawText(rawText: String?): BatchLoadResult {
@@ -153,6 +170,27 @@ class DefaultPromptBatchRepository(
         }
     }
 
+    override fun markCurrentInserted(autoAdvance: Boolean): String? {
+        synchronized(lock) {
+            val current = _batchState.value
+            val prompt = current.currentPrompt ?: return null
+            val updatedCopied = current.copiedIndices + current.currentIndex
+            val nextIndex = if (autoAdvance && current.canGoNext) {
+                current.currentIndex + 1
+            } else {
+                current.currentIndex
+            }
+            if (updatedCopied != current.copiedIndices || nextIndex != current.currentIndex) {
+                _batchState.value = current.copy(
+                    currentIndex = nextIndex,
+                    copiedIndices = updatedCopied,
+                )
+                persistLocked()
+            }
+            return prompt
+        }
+    }
+
     override fun stepPrevious(): Boolean {
         synchronized(lock) {
             val current = _batchState.value
@@ -200,6 +238,22 @@ class DefaultPromptBatchRepository(
         }
     }
 
+    override fun setImeReplaceMode(replaceMode: Boolean) {
+        synchronized(lock) {
+            if (_imePrefs.value.replaceMode == replaceMode) return
+            _imePrefs.value = _imePrefs.value.copy(replaceMode = replaceMode)
+            persistLocked()
+        }
+    }
+
+    override fun setImeAutoNext(autoNext: Boolean) {
+        synchronized(lock) {
+            if (_imePrefs.value.autoNext == autoNext) return
+            _imePrefs.value = _imePrefs.value.copy(autoNext = autoNext)
+            persistLocked()
+        }
+    }
+
     override fun postFeedback(message: String, isError: Boolean) {
         _feedbackEvents.tryEmit(
             OverlayFeedback(
@@ -213,6 +267,7 @@ class DefaultPromptBatchRepository(
     private fun persistLocked() {
         val batch = _batchState.value
         val overlay = _overlayState.value
+        val ime = _imePrefs.value
         persistence.save(
             PersistedBatchSnapshot(
                 prompts = batch.prompts,
@@ -222,6 +277,8 @@ class DefaultPromptBatchRepository(
                 overlayY = overlay.y,
                 hasSavedPosition = overlay.hasSavedPosition,
                 isCollapsed = overlay.isCollapsed,
+                imeReplaceMode = ime.replaceMode,
+                imeAutoNext = ime.autoNext,
             ),
         )
     }

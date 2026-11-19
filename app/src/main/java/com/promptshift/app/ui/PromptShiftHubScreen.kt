@@ -75,6 +75,8 @@ fun PromptShiftHubScreen(
     onToggleBubble: () -> Unit,
     onOpenOverlaySettings: () -> Unit,
     onOpenBatterySettings: () -> Unit,
+    onOpenKeyboardSettings: () -> Unit,
+    onSwitchKeyboard: () -> Unit,
     onLoadFromClipboard: () -> Unit,
     onClearBatch: () -> Unit,
     onCopyAiInstruction: () -> Unit,
@@ -150,6 +152,8 @@ fun PromptShiftHubScreen(
                 readiness = readiness,
                 onOpenOverlaySettings = onOpenOverlaySettings,
                 onOpenBatterySettings = onOpenBatterySettings,
+                onOpenKeyboardSettings = onOpenKeyboardSettings,
+                onSwitchKeyboard = onSwitchKeyboard,
             )
 
             // 4. Direct AI Generate Card (Phase 2)
@@ -399,27 +403,59 @@ private fun RealmeReadinessStrip(
     readiness: RealmeReadinessState,
     onOpenOverlaySettings: () -> Unit,
     onOpenBatterySettings: () -> Unit,
+    onOpenKeyboardSettings: () -> Unit,
+    onSwitchKeyboard: () -> Unit,
 ) {
-    Row(
+    Column(
         modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.spacedBy(10.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp),
     ) {
-        ReadinessChip(
-            modifier = Modifier.weight(1f),
-            title = "Display over apps",
-            statusText = if (readiness.canDrawOverlays) "Ready" else "Grant →",
-            isReady = readiness.canDrawOverlays,
-            accentWhenPending = PromptShiftColors.GtCrimson,
-            onClick = onOpenOverlaySettings,
-        )
-        ReadinessChip(
-            modifier = Modifier.weight(1f),
-            title = "Battery / Background",
-            statusText = if (readiness.isIgnoringBatteryOptimizations) "Unrestricted" else "Settings →",
-            isReady = readiness.isIgnoringBatteryOptimizations,
-            accentWhenPending = PromptShiftColors.TextMuted,
-            onClick = onOpenBatterySettings,
-        )
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            ReadinessChip(
+                modifier = Modifier.weight(1f),
+                title = "Display over apps",
+                statusText = if (readiness.canDrawOverlays) "Ready" else "Grant →",
+                isReady = readiness.canDrawOverlays,
+                accentWhenPending = PromptShiftColors.GtCrimson,
+                onClick = onOpenOverlaySettings,
+            )
+            ReadinessChip(
+                modifier = Modifier.weight(1f),
+                title = "Battery / Background",
+                statusText = if (readiness.isIgnoringBatteryOptimizations) "Unrestricted" else "Settings →",
+                isReady = readiness.isIgnoringBatteryOptimizations,
+                accentWhenPending = PromptShiftColors.TextMuted,
+                onClick = onOpenBatterySettings,
+            )
+        }
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            ReadinessChip(
+                modifier = Modifier.weight(1f),
+                title = "Auto-Insert Keyboard",
+                statusText = when {
+                    readiness.isPromptShiftKeyboardActive -> "Active"
+                    readiness.isPromptShiftKeyboardEnabled -> "Enabled"
+                    else -> "Enable →"
+                },
+                isReady = readiness.isPromptShiftKeyboardEnabled,
+                accentWhenPending = PromptShiftColors.GtCrimson,
+                onClick = onOpenKeyboardSettings,
+            )
+            ReadinessChip(
+                modifier = Modifier.weight(1f),
+                title = "Switch Keyboard",
+                statusText = if (readiness.isPromptShiftKeyboardActive) "PromptShift ⇄" else "Picker →",
+                isReady = readiness.isPromptShiftKeyboardActive,
+                accentWhenPending = PromptShiftColors.TextMuted,
+                onClick = onSwitchKeyboard,
+            )
+        }
     }
 }
 

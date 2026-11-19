@@ -5,10 +5,13 @@ import android.content.Intent
 import android.net.Uri
 import android.os.PowerManager
 import android.provider.Settings
+import android.view.inputmethod.InputMethodManager
 
 data class RealmeReadinessState(
     val canDrawOverlays: Boolean,
     val isIgnoringBatteryOptimizations: Boolean,
+    val isPromptShiftKeyboardEnabled: Boolean = false,
+    val isPromptShiftKeyboardActive: Boolean = false,
 )
 
 object RealmeReadinessHelper {
@@ -17,9 +20,26 @@ object RealmeReadinessHelper {
         val overlayGranted = Settings.canDrawOverlays(context)
         val powerManager = context.getSystemService(Context.POWER_SERVICE) as? PowerManager
         val batteryUnrestricted = powerManager?.isIgnoringBatteryOptimizations(context.packageName) ?: false
+
+        val imm = context.getSystemService(Context.INPUT_METHOD_SERVICE) as? InputMethodManager
+        val enabledList = try {
+            imm?.enabledInputMethodList.orEmpty()
+        } catch (_: Exception) {
+            emptyList()
+        }
+        val imeEnabled = enabledList.any { it.packageName == context.packageName }
+        val defaultIme = try {
+            Settings.Secure.getString(context.contentResolver, Settings.Secure.DEFAULT_INPUT_METHOD).orEmpty()
+        } catch (_: Exception) {
+            ""
+        }
+        val imeActive = defaultIme.startsWith("${context.packageName}/")
+
         return RealmeReadinessState(
             canDrawOverlays = overlayGranted,
             isIgnoringBatteryOptimizations = batteryUnrestricted,
+            isPromptShiftKeyboardEnabled = imeEnabled,
+            isPromptShiftKeyboardActive = imeActive,
         )
     }
 
@@ -35,13 +55,27 @@ object RealmeReadinessHelper {
 
     fun openBatteryAndBackgroundSettings(context: Context) {
         val packageUri = Uri.parse("package:${context.packageName}")
-        // On Realme UI / ColorOS, App Info provides direct access to "Battery usage -> Allow background activity"
-        // while standard Android battery optimization settings works across all devices.
         val intents = listOf(
             Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, packageUri),
             Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS),
         )
         launchFirstAvailable(context, intents)
+    }
+
+    fun openInputMethodSettings(context: Context) {
+        val intents = listOf(
+            Intent(Settings.ACTION_INPUT_METHOD_SETTINGS),
+            Intent(Settings.ACTION_SETTINGS),
+        )
+        launchFirstAvailable(context, intents)
+    }
+
+    fun showInputMethodPicker(context: Context) {
+        try {
+            val imm = context.getSystemService(Context.INPUT_METHOD_SERVICE) as? InputMethodManager
+            imm?.showInputMethodPicker()
+        } catch (_: Exception) {
+        }
     }
 
     private fun launchFirstAvailable(context: Context, intents: List<Intent>) {
@@ -51,7 +85,6 @@ object RealmeReadinessHelper {
                 context.startActivity(intent)
                 return
             } catch (_: Exception) {
-                // Try next fallback
             }
         }
     }
