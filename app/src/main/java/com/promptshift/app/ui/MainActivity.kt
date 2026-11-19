@@ -119,8 +119,8 @@ class MainActivity : ComponentActivity() {
                     onCopyAiInstruction = {
                         val ok = ClipboardHelper.writePlainText(
                             context = this,
-                            label = "PromptShift NanoGPT Format",
-                            text = PromptFormatGuide.NANO_GPT_INSTRUCTION,
+                            label = "PromptShift AI Format",
+                            text = PromptFormatGuide.AI_FORMAT_INSTRUCTION,
                         )
                         bannerMessage = if (ok) "Copied AI instruction ✅" else "Could not write clipboard"
                         bannerIsError = !ok

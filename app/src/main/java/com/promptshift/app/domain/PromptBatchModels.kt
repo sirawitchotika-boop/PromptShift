@@ -58,24 +58,24 @@ object PromptFormatGuide {
 
     val SAMPLE_BLOCK: String = """
         ===PROMPT===
-        [Positive prompt #1 — up to 2,000 chars]
+        <prompt #1 — up to 2,000 chars>
         ===PROMPT===
-        [Positive prompt #2 — up to 2,000 chars]
+        <prompt #2 — up to 2,000 chars>
     """.trimIndent()
 
-    val NANO_GPT_INSTRUCTION: String = """
-        Output all prompts inside ONE single plain-text code block.
-        Rules:
-        1. Put ===PROMPT=== on its own line immediately before each prompt.
-        2. Positive prompts ONLY (no negative prompts, no numbering, no titles, no commentary inside the code block).
-        3. Keep each prompt under 2,000 characters.
+    val AI_FORMAT_INSTRUCTION: String = """
+        [OUTPUT FORMAT — STRICT]
+        - Return ALL generated prompts inside ONE single plain-text code block.
+        - Put ===PROMPT=== on its own line immediately before each prompt.
+        - Output ONLY the final prompt text in each slot — no numbering, no titles, no labels (such as "Prompt 1:"), no negative prompt section, and no extra commentary inside the code block.
+        - Keep each individual prompt under 2,000 characters.
 
-        Exact format:
-        ```text
+        Required layout:
         ===PROMPT===
-        [Positive prompt #1]
+        <prompt text>
         ===PROMPT===
-        [Positive prompt #2]
-        ```
+        <prompt text>
+        ===PROMPT===
+        <prompt text>
     """.trimIndent()
 }

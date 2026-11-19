@@ -1,6 +1,6 @@
 # PromptShift
 
-Lightweight native Android floating clipboard helper for transferring large multi-prompt batches (`===PROMPT===`) from NanoGPT into SeaArt without clipboard truncation.
+Lightweight native Android floating clipboard helper for transferring large multi-prompt batches (`===PROMPT===`) from any AI assistant into your target app without clipboard truncation.
 
 - **Copy-only & Banking-app safe:** Zero `AccessibilityService` permissions.
 - **Android 14 compliant:** Uses `specialUse` foreground service and translucent clipboard focus trampoline.

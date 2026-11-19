@@ -16,7 +16,7 @@ import java.util.concurrent.atomic.AtomicLong
 
 /**
  * Single source of truth for prompt batch & floating overlay state.
- * Kept behind an interface so a future Phase 2 (Direct NanoGPT API + SSE streaming)
+ * Kept behind an interface so a future Phase 2 (Direct OpenAI-compatible AI API + SSE streaming)
  * can plug in cleanly without changing the parser or floating overlay.
  */
 interface PromptBatchRepository {

@@ -170,4 +170,12 @@ class PromptBatchParserTest {
         assertEquals("Prompt number 1", prompts.first())
         assertEquals("Prompt number 55", prompts.last())
     }
+
+    @Test
+    fun `built-in AI format instruction is provider-agnostic and includes delimiter`() {
+        val instruction = PromptFormatGuide.AI_FORMAT_INSTRUCTION
+        assertTrue(instruction.contains(PromptFormatGuide.DELIMITER))
+        assertTrue(!instruction.contains("nanogpt", ignoreCase = true))
+        assertTrue(PromptBatchParser.parse(PromptFormatGuide.SAMPLE_BLOCK) is BatchParseResult.Success)
+    }
 }
