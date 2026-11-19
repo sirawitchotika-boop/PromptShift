@@ -22,6 +22,7 @@ import android.view.animation.DecelerateInterpolator
 import android.widget.FrameLayout
 import android.widget.LinearLayout
 import android.widget.TextView
+import com.promptshift.app.domain.GenerationState
 import com.promptshift.app.domain.OverlayFeedback
 import com.promptshift.app.domain.PromptBatchState
 import kotlin.math.abs
@@ -29,12 +30,14 @@ import kotlin.math.roundToInt
 
 /**
  * Lightweight native View controller for the GT Carbon & Crimson floating overlay.
- * Renders both the Expanded Pill and Collapsed Dot directly in WindowManager for
- * 120Hz smooth dragging and minimal RAM usage on Realme UI / Android 14.
+ * Supports v1 manual Load/Copy plus Phase 2 Quick-Direction [AI] trigger, live SSE
+ * progress badge, and 1-tap [Stop] stream cancellation right from the floating pill.
  */
 class FloatingOverlayViewController(
     private val context: Context,
     private val windowManager: WindowManager,
+    private val onAiClicked: () -> Unit,
+    private val onCancelStreamClicked: () -> Unit,
     private val onLoadClicked: () -> Unit,
     private val onClearConfirmed: () -> Unit,
     private val onCloseClicked: () -> Unit,
@@ -53,6 +56,7 @@ class FloatingOverlayViewController(
     private var collapsedView: View? = null
 
     // Expanded Pill views
+    private var aiButton: TextView? = null
     private var clearButton: TextView? = null
     private var statusCountText: TextView? = null
     private var prevButton: TextView? = null
@@ -68,17 +72,18 @@ class FloatingOverlayViewController(
     private var isCollapsed = false
     private var isAwaitingClearConfirm = false
     private var latestState = PromptBatchState()
+    private var latestGenerationState: GenerationState = GenerationState.Idle
     private var activeFeedback: OverlayFeedback? = null
     private var snapAnimator: ValueAnimator? = null
 
     private val clearConfirmTimeout = Runnable {
         isAwaitingClearConfirm = false
-        renderBatchState(latestState)
+        renderUi()
     }
 
     private val feedbackTimeout = Runnable {
         activeFeedback = null
-        renderBatchState(latestState)
+        renderUi()
     }
 
     fun attach(initialX: Int, initialY: Int, hasSavedPosition: Boolean, collapsed: Boolean) {
@@ -119,7 +124,7 @@ class FloatingOverlayViewController(
         windowManager.addView(container, params)
         isAttached = true
 
-        renderBatchState(latestState)
+        renderUi()
         container.post { clampToScreenBounds(persist = false) }
     }
 
@@ -149,10 +154,52 @@ class FloatingOverlayViewController(
             isAwaitingClearConfirm = false
             mainHandler.removeCallbacks(clearConfirmTimeout)
         }
+        renderUi()
+    }
+
+    fun renderGenerationState(generationState: GenerationState) {
+        latestGenerationState = generationState
+        renderUi()
+    }
+
+    fun showFeedback(feedback: OverlayFeedback) {
+        activeFeedback = feedback
+        mainHandler.removeCallbacks(feedbackTimeout)
+        mainHandler.postDelayed(feedbackTimeout, FEEDBACK_DURATION_MS)
+        renderUi()
+    }
+
+    private fun renderUi() {
+        val state = latestState
+        val genState = latestGenerationState
+        val isStreaming = genState is GenerationState.Streaming
+
+        // Update [AI] / [Stop] button
+        aiButton?.let { btn ->
+            if (isStreaming) {
+                btn.text = "Stop"
+                btn.setTextColor(TEXT_PRIMARY)
+                btn.background = makeButtonBackground(
+                    fillColor = GT_CRIMSON,
+                    pressedColor = GT_CRIMSON_GLOW,
+                    strokeColor = GT_CRIMSON_GLOW,
+                    radiusDp = 8f,
+                )
+            } else {
+                btn.text = "AI"
+                btn.setTextColor(TEXT_PRIMARY)
+                btn.background = makeButtonBackground(
+                    fillColor = CARBON_CHIP,
+                    pressedColor = CARBON_CHIP_PRESSED,
+                    strokeColor = GT_CRIMSON,
+                    radiusDp = 8f,
+                )
+            }
+        }
 
         // Update Clear button (2-tap confirmation state)
         clearButton?.let { btn ->
-            val enabled = !state.isEmpty
+            val enabled = !state.isEmpty && !isStreaming
             btn.isEnabled = enabled
             btn.alpha = if (enabled) 1f else 0.4f
             if (isAwaitingClearConfirm && enabled) {
@@ -176,19 +223,27 @@ class FloatingOverlayViewController(
             }
         }
 
-        // Update char count / temporary feedback slot
+        // Update char count / live stream / temporary feedback slot
         statusCountText?.let { tv ->
             val fb = activeFeedback
-            if (fb != null) {
-                tv.text = fb.message
-                tv.setTextColor(if (fb.isError) QUOTA_WARN_RED else COPIED_EMERALD)
-                tv.setTypeface(Typeface.DEFAULT_BOLD)
-            } else {
-                tv.text = state.charCountLabel()
-                if (state.isCurrentExceedingQuota) {
+            when {
+                fb != null -> {
+                    tv.text = fb.message
+                    tv.setTextColor(if (fb.isError) QUOTA_WARN_RED else COPIED_EMERALD)
+                    tv.setTypeface(Typeface.DEFAULT_BOLD)
+                }
+                state.isCurrentExceedingQuota -> {
+                    tv.text = state.charCountLabel()
                     tv.setTextColor(QUOTA_WARN_RED)
                     tv.setTypeface(Typeface.MONOSPACE, Typeface.BOLD)
-                } else {
+                }
+                genState is GenerationState.Streaming -> {
+                    tv.text = "Live ${genState.unlockedCount}/${genState.targetCount}"
+                    tv.setTextColor(COPIED_EMERALD)
+                    tv.setTypeface(Typeface.MONOSPACE, Typeface.BOLD)
+                }
+                else -> {
+                    tv.text = state.charCountLabel()
                     tv.setTextColor(TEXT_MUTED)
                     tv.setTypeface(Typeface.MONOSPACE, Typeface.NORMAL)
                 }
@@ -207,9 +262,19 @@ class FloatingOverlayViewController(
 
         // Update Center Copy CTA
         copyButton?.let { btn ->
-            btn.text = state.copyButtonLabel()
             when {
+                state.isEmpty && isStreaming -> {
+                    btn.text = "Streaming..."
+                    btn.setTextColor(COPIED_EMERALD)
+                    btn.background = makeButtonBackground(
+                        fillColor = COPIED_EMERALD_SURFACE,
+                        pressedColor = COPIED_EMERALD_SURFACE,
+                        strokeColor = COPIED_EMERALD,
+                        radiusDp = 10f,
+                    )
+                }
                 state.isEmpty -> {
+                    btn.text = state.copyButtonLabel()
                     btn.setTextColor(TEXT_PRIMARY)
                     btn.background = makeButtonBackground(
                         fillColor = CARBON_CHIP,
@@ -219,6 +284,7 @@ class FloatingOverlayViewController(
                     )
                 }
                 state.isCurrentCopied -> {
+                    btn.text = state.copyButtonLabel()
                     btn.setTextColor(COPIED_EMERALD)
                     btn.background = makeButtonBackground(
                         fillColor = COPIED_EMERALD_SURFACE,
@@ -229,6 +295,7 @@ class FloatingOverlayViewController(
                     )
                 }
                 else -> {
+                    btn.text = state.copyButtonLabel()
                     btn.setTextColor(TEXT_PRIMARY)
                     btn.background = makeButtonBackground(
                         fillColor = GT_CRIMSON,
@@ -241,15 +308,12 @@ class FloatingOverlayViewController(
         }
 
         // Update Collapsed Dot
-        collapsedSlotText?.text = state.collapsedBadgeLabel()
-        collapsedCopiedDot?.visibility = if (state.isCurrentCopied) View.VISIBLE else View.GONE
-    }
-
-    fun showFeedback(feedback: OverlayFeedback) {
-        activeFeedback = feedback
-        mainHandler.removeCallbacks(feedbackTimeout)
-        mainHandler.postDelayed(feedbackTimeout, FEEDBACK_DURATION_MS)
-        renderBatchState(latestState)
+        collapsedSlotText?.text = if (isStreaming && state.isEmpty) {
+            "…"
+        } else {
+            state.collapsedBadgeLabel()
+        }
+        collapsedCopiedDot?.visibility = if (state.isCurrentCopied || isStreaming) View.VISIBLE else View.GONE
     }
 
     fun setCollapsed(collapsed: Boolean) {
@@ -285,7 +349,7 @@ class FloatingOverlayViewController(
     private fun buildExpandedPill(): View {
         val pill = DragContainerLayout(context).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(dp(10), dp(8), dp(10), dp(10))
+            setPadding(dp(9), dp(8), dp(9), dp(10))
             elevation = dp(8).toFloat()
             background = GradientDrawable().apply {
                 shape = GradientDrawable.RECTANGLE
@@ -297,7 +361,7 @@ class FloatingOverlayViewController(
             onDragEnd = { clampToScreenBounds(persist = true) }
         }
 
-        // Top row: [●] [Load] [Clear]  1840/2000  [✕]
+        // Top row: [●] [AI] [Load] [Clear]  1840/2000  [✕]
         val topRow = LinearLayout(context).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
@@ -319,8 +383,8 @@ class FloatingOverlayViewController(
                 strokeColor = METAL_BORDER,
                 radiusDp = 14f,
             )
-            layoutParams = LinearLayout.LayoutParams(dp(28), dp(28)).apply {
-                marginEnd = dp(6)
+            layoutParams = LinearLayout.LayoutParams(dp(26), dp(26)).apply {
+                marginEnd = dp(5)
             }
             setOnClickListener {
                 performSubtleHaptic(it)
@@ -328,15 +392,27 @@ class FloatingOverlayViewController(
             }
         }
 
+        val aiBtn = makeTopChipButton("AI") { view ->
+            performSubtleHaptic(view)
+            if (latestGenerationState.isStreaming) {
+                onCancelStreamClicked()
+            } else {
+                onAiClicked()
+            }
+        }.apply {
+            (layoutParams as LinearLayout.LayoutParams).marginEnd = dp(5)
+        }
+        aiButton = aiBtn
+
         val loadBtn = makeTopChipButton("Load") { view ->
             performSubtleHaptic(view)
             onLoadClicked()
         }.apply {
-            (layoutParams as LinearLayout.LayoutParams).marginEnd = dp(6)
+            (layoutParams as LinearLayout.LayoutParams).marginEnd = dp(5)
         }
 
         val clearBtn = makeTopChipButton("Clear") { view ->
-            if (latestState.isEmpty) return@makeTopChipButton
+            if (latestState.isEmpty || latestGenerationState.isStreaming) return@makeTopChipButton
             performSubtleHaptic(view)
             if (isAwaitingClearConfirm) {
                 isAwaitingClearConfirm = false
@@ -346,36 +422,36 @@ class FloatingOverlayViewController(
                 isAwaitingClearConfirm = true
                 mainHandler.removeCallbacks(clearConfirmTimeout)
                 mainHandler.postDelayed(clearConfirmTimeout, CLEAR_CONFIRM_TIMEOUT_MS)
-                renderBatchState(latestState)
+                renderUi()
             }
         }.apply {
-            (layoutParams as LinearLayout.LayoutParams).marginEnd = dp(8)
+            (layoutParams as LinearLayout.LayoutParams).marginEnd = dp(6)
         }
         clearButton = clearBtn
 
         val countTv = TextView(context).apply {
             text = "0/2000"
-            setTextSize(TypedValue.COMPLEX_UNIT_SP, 11.5f)
+            setTextSize(TypedValue.COMPLEX_UNIT_SP, 11f)
             setTextColor(TEXT_MUTED)
             typeface = Typeface.MONOSPACE
             gravity = Gravity.CENTER
             maxLines = 1
             ellipsize = TextUtils.TruncateAt.END
-            minWidth = dp(76)
-            maxWidth = dp(122)
+            minWidth = dp(66)
+            maxWidth = dp(104)
             setPadding(dp(2), 0, dp(2), 0)
             layoutParams = LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.WRAP_CONTENT,
                 LinearLayout.LayoutParams.WRAP_CONTENT,
             ).apply {
-                marginEnd = dp(8)
+                marginEnd = dp(6)
             }
         }
         statusCountText = countTv
 
         val closeBtn = TextView(context).apply {
             text = "✕"
-            setTextSize(TypedValue.COMPLEX_UNIT_SP, 13f)
+            setTextSize(TypedValue.COMPLEX_UNIT_SP, 12.5f)
             setTextColor(TEXT_MUTED)
             typeface = Typeface.DEFAULT_BOLD
             gravity = Gravity.CENTER
@@ -386,7 +462,7 @@ class FloatingOverlayViewController(
                 strokeColor = METAL_BORDER,
                 radiusDp = 14f,
             )
-            layoutParams = LinearLayout.LayoutParams(dp(28), dp(28))
+            layoutParams = LinearLayout.LayoutParams(dp(26), dp(26))
             setOnClickListener {
                 performSubtleHaptic(it)
                 onCloseClicked()
@@ -394,6 +470,7 @@ class FloatingOverlayViewController(
         }
 
         topRow.addView(collapseBtn)
+        topRow.addView(aiBtn)
         topRow.addView(loadBtn)
         topRow.addView(clearBtn)
         topRow.addView(countTv)
@@ -425,13 +502,14 @@ class FloatingOverlayViewController(
             gravity = Gravity.CENTER
             maxLines = 1
             ellipsize = TextUtils.TruncateAt.END
-            setPadding(dp(14), 0, dp(14), 0)
+            setPadding(dp(12), 0, dp(12), 0)
             minWidth = dp(156)
             layoutParams = LinearLayout.LayoutParams(0, dp(40), 1f).apply {
                 marginStart = dp(8)
                 marginEnd = dp(8)
             }
             setOnClickListener { view ->
+                if (latestState.isEmpty && latestGenerationState.isStreaming) return@setOnClickListener
                 performSubtleHaptic(view)
                 if (latestState.isEmpty) {
                     onLoadClicked()
@@ -502,7 +580,6 @@ class FloatingOverlayViewController(
         badge.addView(slotText)
         badge.addView(copiedDot)
 
-        // Smooth drag + edge snap on release + single tap to expand
         var downRawX = 0f
         var downRawY = 0f
         var lastRawX = 0f
@@ -560,11 +637,11 @@ class FloatingOverlayViewController(
     private fun makeTopChipButton(label: String, onClick: (View) -> Unit): TextView {
         return TextView(context).apply {
             text = label
-            setTextSize(TypedValue.COMPLEX_UNIT_SP, 11.5f)
+            setTextSize(TypedValue.COMPLEX_UNIT_SP, 11f)
             setTextColor(TEXT_PRIMARY)
             typeface = Typeface.DEFAULT_BOLD
             gravity = Gravity.CENTER
-            setPadding(dp(9), 0, dp(9), 0)
+            setPadding(dp(8), 0, dp(8), 0)
             background = makeButtonBackground(
                 fillColor = CARBON_CHIP,
                 pressedColor = CARBON_CHIP_PRESSED,
@@ -573,7 +650,7 @@ class FloatingOverlayViewController(
             )
             layoutParams = LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.WRAP_CONTENT,
-                dp(28),
+                dp(26),
             )
             setOnClickListener(onClick)
         }
@@ -705,7 +782,7 @@ class FloatingOverlayViewController(
     private fun computeClampedPosition(rawX: Int, rawY: Int): Pair<Int, Int> {
         val (screenW, screenH) = currentScreenSize()
         val root = rootContainer
-        val viewW = root?.width?.takeIf { it > 0 } ?: if (isCollapsed) dp(48) else dp(300)
+        val viewW = root?.width?.takeIf { it > 0 } ?: if (isCollapsed) dp(48) else dp(320)
         val viewH = root?.height?.takeIf { it > 0 } ?: if (isCollapsed) dp(48) else dp(96)
         val marginX = dp(EDGE_MARGIN_DP)
         val minY = dp(TOP_SAFE_MARGIN_DP)
@@ -735,10 +812,6 @@ class FloatingOverlayViewController(
 
     private fun dp(value: Int): Int = (value * density).roundToInt()
 
-    /**
-     * Intercepts drag gestures anywhere on the Expanded Pill once finger movement exceeds touchSlop,
-     * while letting crisp taps pass directly through to all child buttons.
-     */
     private inner class DragContainerLayout(context: Context) : LinearLayout(context) {
         var onDragDelta: ((Int, Int) -> Unit)? = null
         var onDragEnd: (() -> Unit)? = null
@@ -823,7 +896,6 @@ class FloatingOverlayViewController(
         private const val TOP_SAFE_MARGIN_DP = 36
         private const val BOTTOM_SAFE_MARGIN_DP = 32
 
-        // GT Carbon & Crimson design tokens
         private val OBSIDIAN_BG = Color.parseColor("#0A0A0D")
         private val CARBON_SURFACE_94 = Color.parseColor("#F0141419")
         private val CARBON_CHIP = Color.parseColor("#1D1D24")

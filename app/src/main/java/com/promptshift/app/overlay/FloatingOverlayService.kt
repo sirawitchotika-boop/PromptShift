@@ -20,8 +20,10 @@ import com.promptshift.app.PromptShiftApp
 import com.promptshift.app.R
 import com.promptshift.app.clipboard.ClipboardHelper
 import com.promptshift.app.clipboard.ClipboardTrampolineActivity
+import com.promptshift.app.domain.GenerationState
 import com.promptshift.app.domain.PromptBatchState
 import com.promptshift.app.ui.MainActivity
+import com.promptshift.app.ui.QuickDirectionActivity
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -44,8 +46,11 @@ class FloatingOverlayService : Service() {
 
         val app = PromptShiftApp.from(this)
         val repository = app.repository
+        val coordinator = app.generationCoordinator
 
-        startForegroundCompliant(buildNotification(repository.batchState.value))
+        startForegroundCompliant(
+            buildNotification(repository.batchState.value, coordinator.generationState.value),
+        )
 
         if (!Settings.canDrawOverlays(this)) {
             stopSelf()
@@ -56,6 +61,8 @@ class FloatingOverlayService : Service() {
         val controller = FloatingOverlayViewController(
             context = this,
             windowManager = windowManager,
+            onAiClicked = { QuickDirectionActivity.launch(this) },
+            onCancelStreamClicked = { coordinator.cancelGeneration() },
             onLoadClicked = { ClipboardTrampolineActivity.launch(this) },
             onClearConfirmed = { repository.clearBatch() },
             onCloseClicked = { stopSelf() },
@@ -84,7 +91,14 @@ class FloatingOverlayService : Service() {
         serviceScope.launch {
             repository.batchState.collect { batch ->
                 controller.renderBatchState(batch)
-                updateNotification(batch)
+                updateNotification(batch, coordinator.generationState.value)
+            }
+        }
+
+        serviceScope.launch {
+            coordinator.generationState.collect { genState ->
+                controller.renderGenerationState(genState)
+                updateNotification(repository.batchState.value, genState)
             }
         }
 
@@ -147,7 +161,10 @@ class FloatingOverlayService : Service() {
         manager.createNotificationChannel(channel)
     }
 
-    private fun buildNotification(batchState: PromptBatchState): Notification {
+    private fun buildNotification(
+        batchState: PromptBatchState,
+        generationState: GenerationState,
+    ): Notification {
         val openHubIntent = Intent(this, MainActivity::class.java).apply {
             flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
         }
@@ -168,10 +185,13 @@ class FloatingOverlayService : Service() {
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
         )
 
-        val contentText = if (batchState.isEmpty) {
-            "Ready — tap Load on the bubble"
-        } else {
-            "Slot #${batchState.displayIndex}/${batchState.totalCount} • ${batchState.copiedCount}/${batchState.totalCount} copied"
+        val contentText = when {
+            generationState is GenerationState.Streaming ->
+                "Streaming ${generationState.unlockedCount}/${generationState.targetCount} from ${generationState.providerName}..."
+            batchState.isEmpty ->
+                "Ready — tap AI or Load on the bubble"
+            else ->
+                "Slot #${batchState.displayIndex}/${batchState.totalCount} • ${batchState.copiedCount}/${batchState.totalCount} copied"
         }
 
         return NotificationCompat.Builder(this, CHANNEL_ID)
@@ -187,10 +207,13 @@ class FloatingOverlayService : Service() {
             .build()
     }
 
-    private fun updateNotification(batchState: PromptBatchState) {
+    private fun updateNotification(
+        batchState: PromptBatchState,
+        generationState: GenerationState,
+    ) {
         try {
             val manager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-            manager.notify(NOTIFICATION_ID, buildNotification(batchState))
+            manager.notify(NOTIFICATION_ID, buildNotification(batchState, generationState))
         } catch (_: Exception) {
         }
     }

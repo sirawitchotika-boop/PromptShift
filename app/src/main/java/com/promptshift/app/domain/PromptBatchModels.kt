@@ -12,6 +12,8 @@ data class PromptBatchState(
     val isCurrentExceedingQuota: Boolean get() = currentCharCount > PromptFormatGuide.SOFT_QUOTA_CHARS
     val isCurrentCopied: Boolean get() = prompts.isNotEmpty() && currentIndex in copiedIndices
     val copiedCount: Int get() = copiedIndices.count { it in prompts.indices }
+    val uncopiedCount: Int get() = (totalCount - copiedCount).coerceAtLeast(0)
+    val hasUncopiedPrompts: Boolean get() = uncopiedCount > 0
     val canGoPrevious: Boolean get() = prompts.isNotEmpty() && currentIndex > 0
     val canGoNext: Boolean get() = prompts.isNotEmpty() && currentIndex < prompts.lastIndex
     val displayIndex: Int get() = if (prompts.isEmpty()) 0 else currentIndex + 1
@@ -78,4 +80,15 @@ object PromptFormatGuide {
         ===PROMPT===
         <prompt text>
     """.trimIndent()
+
+    fun buildStreamingSystemRule(promptCount: Int): String {
+        val safeCount = promptCount.coerceIn(1, 100)
+        return """
+            [OUTPUT FORMAT — STRICT]
+            - Generate exactly $safeCount prompts.
+            - Put ===PROMPT=== on its own line immediately before each prompt.
+            - Output ONLY the final prompt text in each slot — no numbering, no titles, no labels (such as "Prompt 1:"), no negative prompt section, no markdown prose, and no extra commentary.
+            - Keep each individual prompt under $SOFT_QUOTA_CHARS characters.
+        """.trimIndent()
+    }
 }

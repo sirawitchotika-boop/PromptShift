@@ -15,6 +15,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.core.content.ContextCompat
 import androidx.core.view.WindowInsetsControllerCompat
@@ -22,10 +23,13 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.promptshift.app.PromptShiftApp
 import com.promptshift.app.clipboard.ClipboardHelper
 import com.promptshift.app.domain.BatchLoadResult
+import com.promptshift.app.domain.ConnectionTestResult
+import com.promptshift.app.domain.InstructionImportResult
 import com.promptshift.app.domain.PromptFormatGuide
 import com.promptshift.app.overlay.FloatingOverlayService
 import com.promptshift.app.ui.theme.PromptShiftTheme
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 
 class MainActivity : ComponentActivity() {
 
@@ -36,6 +40,8 @@ class MainActivity : ComponentActivity() {
         ),
     )
 
+    private var bannerMessageState by mutableStateOf<String?>(null)
+    private var bannerIsErrorState by mutableStateOf(false)
     private var pendingStartAfterNotificationPrompt = false
 
     private val notificationPermissionLauncher = registerForActivityResult(
@@ -47,6 +53,44 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    private val exportInstructionsLauncher = registerForActivityResult(
+        ActivityResultContracts.CreateDocument("application/json"),
+    ) { uri ->
+        if (uri == null) return@registerForActivityResult
+        try {
+            val json = PromptShiftApp.from(this).aiConfigRepository.exportInstructionsJson()
+            contentResolver.openOutputStream(uri)?.use { out ->
+                out.write(json.toByteArray(Charsets.UTF_8))
+                out.flush()
+            }
+            showBanner("Exported Instruction Profiles (no API keys)", isError = false)
+        } catch (_: Exception) {
+            showBanner("Could not export Instruction Profiles", isError = true)
+        }
+    }
+
+    private val importInstructionsLauncher = registerForActivityResult(
+        ActivityResultContracts.OpenDocument(),
+    ) { uri ->
+        if (uri == null) return@registerForActivityResult
+        try {
+            val json = contentResolver.openInputStream(uri)
+                ?.bufferedReader(Charsets.UTF_8)
+                ?.use { it.readText() }
+                .orEmpty()
+            when (val res = PromptShiftApp.from(this).aiConfigRepository.importInstructionsJson(json)) {
+                is InstructionImportResult.Imported -> {
+                    showBanner("Imported ${res.count} instruction preset${if (res.count == 1) "" else "s"}", isError = false)
+                }
+                is InstructionImportResult.Failed -> {
+                    showBanner(res.reason, isError = true)
+                }
+            }
+        } catch (_: Exception) {
+            showBanner("Could not read selected file", isError = true)
+        }
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         configureRealmeEdgeToEdge()
         super.onCreate(savedInstanceState)
@@ -54,38 +98,47 @@ class MainActivity : ComponentActivity() {
         refreshReadiness()
         val app = PromptShiftApp.from(this)
         val repository = app.repository
+        val aiConfigRepository = app.aiConfigRepository
+        val coordinator = app.generationCoordinator
 
         setContent {
             PromptShiftTheme {
                 val batchState by repository.batchState.collectAsStateWithLifecycle()
+                val aiConfig by aiConfigRepository.configState.collectAsStateWithLifecycle()
+                val generationState by coordinator.generationState.collectAsStateWithLifecycle()
                 val isOverlayRunning by app.isOverlayRunning.collectAsStateWithLifecycle()
 
-                var bannerMessage by remember { mutableStateOf<String?>(null) }
-                var bannerIsError by remember { mutableStateOf(false) }
+                val uiScope = rememberCoroutineScope()
+                var testingProviderId by remember { mutableStateOf<String?>(null) }
+                var connectionTestResults by remember {
+                    mutableStateOf<Map<String, ConnectionTestResult>>(emptyMap())
+                }
 
-                LaunchedEffect(bannerMessage) {
-                    if (bannerMessage != null) {
-                        delay(2600L)
-                        bannerMessage = null
+                LaunchedEffect(bannerMessageState) {
+                    if (bannerMessageState != null) {
+                        delay(2800L)
+                        bannerMessageState = null
                     }
                 }
 
                 PromptShiftHubScreen(
                     batchState = batchState,
+                    aiConfig = aiConfig,
+                    generationState = generationState,
                     isOverlayRunning = isOverlayRunning,
                     readiness = readinessState,
-                    statusBanner = bannerMessage,
-                    statusBannerIsError = bannerIsError,
+                    statusBanner = bannerMessageState,
+                    statusBannerIsError = bannerIsErrorState,
+                    testingProviderId = testingProviderId,
+                    connectionTestResults = connectionTestResults,
                     onToggleBubble = {
                         if (isOverlayRunning) {
                             FloatingOverlayService.stop(this)
-                            bannerMessage = "Floating bubble stopped"
-                            bannerIsError = false
+                            showBanner("Floating bubble stopped", isError = false)
                         } else {
                             handleStartBubbleRequest(
                                 onNeedOverlayPermission = {
-                                    bannerMessage = "Enable Display over other apps first"
-                                    bannerIsError = true
+                                    showBanner("Enable Display over other apps first", isError = true)
                                 },
                             )
                         }
@@ -100,21 +153,18 @@ class MainActivity : ComponentActivity() {
                         val raw = ClipboardHelper.readPlainText(this)
                         when (val result = repository.loadFromRawText(raw)) {
                             is BatchLoadResult.Loaded -> {
-                                bannerMessage = "Loaded ${result.count} prompt${if (result.count == 1) "" else "s"}"
-                                bannerIsError = false
+                                showBanner("Loaded ${result.count} prompt${if (result.count == 1) "" else "s"}", isError = false)
                             }
                             BatchLoadResult.PreservedNoDelimiter,
                             BatchLoadResult.PreservedEmpty,
                             -> {
-                                bannerMessage = "No ===PROMPT=== found — existing batch preserved"
-                                bannerIsError = true
+                                showBanner("No ===PROMPT=== found — existing batch preserved", isError = true)
                             }
                         }
                     },
                     onClearBatch = {
                         repository.clearBatch()
-                        bannerMessage = "Batch cleared"
-                        bannerIsError = false
+                        showBanner("Batch cleared", isError = false)
                     },
                     onCopyAiInstruction = {
                         val ok = ClipboardHelper.writePlainText(
@@ -122,8 +172,55 @@ class MainActivity : ComponentActivity() {
                             label = "PromptShift AI Format",
                             text = PromptFormatGuide.AI_FORMAT_INSTRUCTION,
                         )
-                        bannerMessage = if (ok) "Copied AI instruction ✅" else "Could not write clipboard"
-                        bannerIsError = !ok
+                        showBanner(
+                            if (ok) "Copied AI instruction ✅" else "Could not write clipboard",
+                            isError = !ok,
+                        )
+                    },
+                    onSelectProvider = { aiConfigRepository.selectProvider(it) },
+                    onSaveProvider = { id, name, baseUrl, modelId, apiKeyInput ->
+                        val saved = aiConfigRepository.saveProvider(id, name, baseUrl, modelId, apiKeyInput)
+                        connectionTestResults = connectionTestResults - saved.id
+                        showBanner("Saved provider ${saved.name}", isError = false)
+                    },
+                    onDeleteProvider = { id ->
+                        aiConfigRepository.deleteProvider(id)
+                        connectionTestResults = connectionTestResults - id
+                        showBanner("Provider removed", isError = false)
+                    },
+                    onTestProvider = { providerId ->
+                        if (testingProviderId != null) return@PromptShiftHubScreen
+                        testingProviderId = providerId
+                        uiScope.launch {
+                            val result = coordinator.testConnection(providerId)
+                            connectionTestResults = connectionTestResults + (providerId to result)
+                            testingProviderId = null
+                        }
+                    },
+                    onSelectInstruction = { aiConfigRepository.selectInstruction(it) },
+                    onSaveInstruction = { id, name, body ->
+                        val saved = aiConfigRepository.saveInstruction(id, name, body)
+                        showBanner("Saved instruction ${saved.name}", isError = false)
+                    },
+                    onDeleteInstruction = { id ->
+                        aiConfigRepository.deleteInstruction(id)
+                        showBanner("Instruction removed", isError = false)
+                    },
+                    onExportInstructions = {
+                        exportInstructionsLauncher.launch("promptshift-instructions.json")
+                    },
+                    onImportInstructions = {
+                        importInstructionsLauncher.launch(arrayOf("application/json", "text/plain", "*/*"))
+                    },
+                    onStartGeneration = { direction, count, allowReplace ->
+                        coordinator.startGeneration(
+                            direction = direction,
+                            promptCount = count,
+                            allowReplaceExisting = allowReplace,
+                        )
+                    },
+                    onCancelGeneration = {
+                        coordinator.cancelGeneration()
                     },
                 )
             }
@@ -133,6 +230,11 @@ class MainActivity : ComponentActivity() {
     override fun onResume() {
         super.onResume()
         refreshReadiness()
+    }
+
+    private fun showBanner(message: String, isError: Boolean) {
+        bannerMessageState = message
+        bannerIsErrorState = isError
     }
 
     @Suppress("DEPRECATION")
