@@ -1,0 +1,51 @@
+name: Android CI & APK Build
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  build-and-test:
+    name: Test, Lint & Build Debug APK
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Verify zero AccessibilityService usage (Banking-app safety check)
+        run: |
+          if grep -rnE "BIND_ACCESSIBILITY_SERVICE|AccessibilityService" app/src/main; then
+            echo "ERROR: Forbidden AccessibilityService reference found!"
+            exit 1
+          fi
+          echo "PASS: Zero AccessibilityService references in app/src/main."
+
+      - name: Run unit tests, lint, and assemble debug APK
+        run: ./gradlew testDebugUnitTest lintDebug assembleDebug
+
+      - name: Prepare PromptShift-debug.apk artifact
+        run: |
+          mkdir -p dist
+          cp app/build/outputs/apk/debug/app-debug.apk dist/PromptShift-debug.apk
+          ls -lh dist/PromptShift-debug.apk
+
+      - name: Upload PromptShift-debug.apk artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: PromptShift-debug.apk
+          path: dist/PromptShift-debug.apk
+          if-no-files-found: error
+          retention-days: 30

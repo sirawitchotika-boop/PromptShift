@@ -1,0 +1,2 @@
+# PromptShift ProGuard rules
+-dontobfuscate

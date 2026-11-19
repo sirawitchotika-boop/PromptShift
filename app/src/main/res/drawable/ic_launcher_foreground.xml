@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- Outer GT Crimson ring -->
+    <path
+        android:fillColor="#00000000"
+        android:strokeColor="#D61F26"
+        android:strokeWidth="4"
+        android:pathData="M54,24 A30,30 0 1,1 53.99,24 Z" />
+    <!-- Prompt shift chevrons -->
+    <path
+        android:fillColor="#F5F5F7"
+        android:pathData="M37,40 L51,54 L37,68 L43,72 L61,54 L43,36 Z" />
+    <path
+        android:fillColor="#D61F26"
+        android:pathData="M53,40 L67,54 L53,68 L59,72 L77,54 L59,36 Z" />
+</vector>
