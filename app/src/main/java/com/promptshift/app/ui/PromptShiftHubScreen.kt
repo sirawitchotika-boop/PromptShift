@@ -134,8 +134,8 @@ fun PromptShiftHubScreen(
                 },
             )
 
-            // 5. NanoGPT Format Helper Card
-            NanoGptFormatHelperCard(
+            // 5. AI Format Helper Card
+            AiFormatHelperCard(
                 onCopyAiInstruction = onCopyAiInstruction,
             )
 
@@ -244,7 +244,7 @@ private fun HeroControlCard(
         Text(
             text = when {
                 isOverlayRunning -> "Bubble is floating over your apps. Tap ✕ on the pill or Stop below anytime."
-                canDrawOverlays -> "Launch the floating pill before opening SeaArt so you can Load and Copy prompts in one tap."
+                canDrawOverlays -> "Launch the floating pill before switching apps so you can Load and Copy prompts in one tap."
                 else -> "Grant Display over other apps below, then start the floating bubble."
             },
             color = PromptShiftColors.TextPrimary.copy(alpha = 0.88f),
@@ -396,7 +396,7 @@ private fun ActiveBatchCard(
             )
             Spacer(modifier = Modifier.height(4.dp))
             Text(
-                text = "Copy a ===PROMPT=== batch from NanoGPT, then tap Load on the bubble or below.",
+                text = "Copy a ===PROMPT=== batch from any AI chat, then tap Load on the bubble or below.",
                 color = PromptShiftColors.TextMuted,
                 fontSize = 13.sp,
                 lineHeight = 18.sp,
@@ -533,12 +533,12 @@ private fun ActiveBatchCard(
 }
 
 @Composable
-private fun NanoGptFormatHelperCard(
+private fun AiFormatHelperCard(
     onCopyAiInstruction: () -> Unit,
 ) {
     CarbonCard {
         Text(
-            text = "NANOGPT FORMAT HELPER",
+            text = "AI FORMAT HELPER",
             color = PromptShiftColors.TextMuted,
             fontSize = 11.sp,
             fontWeight = FontWeight.Bold,
@@ -546,7 +546,7 @@ private fun NanoGptFormatHelperCard(
         )
         Spacer(modifier = Modifier.height(6.dp))
         Text(
-            text = "Ask NanoGPT to wrap all positive prompts inside a single code block separated by ===PROMPT=== on its own line.",
+            text = "Append this rule to any AI prompt so it returns all prompts in one code block separated by ===PROMPT=== on its own line.",
             color = PromptShiftColors.TextPrimary.copy(alpha = 0.86f),
             fontSize = 13.sp,
             lineHeight = 18.5.sp,
