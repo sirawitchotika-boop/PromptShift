@@ -1,0 +1,23 @@
+# Gradle & Build
+.gradle/
+build/
+app/build/
+local.properties
+*.apk
+*.aab
+*.ap_
+*.dex
+*.class
+
+# IDE
+.idea/
+*.iml
+.DS_Store
+captures/
+.cxx/
+.externalNativeBuild/
+
+# Keystores & secrets
+*.jks
+*.keystore
+keystore.properties
