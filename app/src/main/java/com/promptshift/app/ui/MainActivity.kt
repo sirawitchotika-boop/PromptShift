@@ -149,6 +149,17 @@ class MainActivity : ComponentActivity() {
                     onOpenBatterySettings = {
                         RealmeReadinessHelper.openBatteryAndBackgroundSettings(this)
                     },
+                    onOpenKeyboardSettings = {
+                        RealmeReadinessHelper.openInputMethodSettings(this)
+                    },
+                    onSwitchKeyboard = {
+                        if (!readinessState.isPromptShiftKeyboardEnabled) {
+                            showBanner("Enable PromptShift Keyboard first", isError = true)
+                            RealmeReadinessHelper.openInputMethodSettings(this)
+                        } else {
+                            RealmeReadinessHelper.showInputMethodPicker(this)
+                        }
+                    },
                     onLoadFromClipboard = {
                         val raw = ClipboardHelper.readPlainText(this)
                         when (val result = repository.loadFromRawText(raw)) {

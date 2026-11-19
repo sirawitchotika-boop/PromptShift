@@ -5,4 +5,6 @@
     <string name="notification_channel_desc">Keeps the PromptShift floating overlay active while switching between apps.</string>
     <string name="notification_title">PromptShift Active</string>
     <string name="notification_action_stop">Stop</string>
+    <string name="ime_label">PromptShift Keyboard</string>
+    <string name="ime_subtype_label">PromptShift Auto-Insert</string>
 </resources>

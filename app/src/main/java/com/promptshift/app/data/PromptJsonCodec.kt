@@ -8,6 +8,8 @@ data class PersistedBatchSnapshot(
     val overlayY: Int = 180,
     val hasSavedPosition: Boolean = false,
     val isCollapsed: Boolean = false,
+    val imeReplaceMode: Boolean = true,
+    val imeAutoNext: Boolean = false,
 )
 
 /**
@@ -17,7 +19,7 @@ data class PersistedBatchSnapshot(
 object PromptJsonCodec {
 
     fun encode(snapshot: PersistedBatchSnapshot): String {
-        val estimatedSize = snapshot.prompts.sumOf { it.length + 8 } + 192
+        val estimatedSize = snapshot.prompts.sumOf { it.length + 8 } + 256
         val sb = StringBuilder(estimatedSize)
         sb.append('{')
         sb.append("\"currentIndex\":").append(snapshot.currentIndex).append(',')
@@ -25,6 +27,8 @@ object PromptJsonCodec {
         sb.append("\"overlayY\":").append(snapshot.overlayY).append(',')
         sb.append("\"hasSavedPosition\":").append(snapshot.hasSavedPosition).append(',')
         sb.append("\"isCollapsed\":").append(snapshot.isCollapsed).append(',')
+        sb.append("\"imeReplaceMode\":").append(snapshot.imeReplaceMode).append(',')
+        sb.append("\"imeAutoNext\":").append(snapshot.imeAutoNext).append(',')
         sb.append("\"copiedIndices\":[")
         snapshot.copiedIndices.sorted().forEachIndexed { idx, value ->
             if (idx > 0) sb.append(',')
@@ -53,6 +57,8 @@ object PromptJsonCodec {
             var overlayY = 180
             var hasSavedPosition = false
             var isCollapsed = false
+            var imeReplaceMode = true
+            var imeAutoNext = false
 
             reader.skipWhitespace()
             if (!reader.peekChar('}')) {
@@ -69,6 +75,8 @@ object PromptJsonCodec {
                         "overlayY" -> overlayY = reader.readInt() ?: return null
                         "hasSavedPosition" -> hasSavedPosition = reader.readBoolean() ?: return null
                         "isCollapsed" -> isCollapsed = reader.readBoolean() ?: return null
+                        "imeReplaceMode" -> imeReplaceMode = reader.readBoolean() ?: return null
+                        "imeAutoNext" -> imeAutoNext = reader.readBoolean() ?: return null
                         "copiedIndices" -> copiedIndices = reader.readIntList()?.toSet() ?: return null
                         "prompts" -> prompts = reader.readStringList() ?: return null
                         else -> if (!reader.skipValue()) return null
@@ -94,6 +102,8 @@ object PromptJsonCodec {
                 overlayY = overlayY,
                 hasSavedPosition = hasSavedPosition,
                 isCollapsed = isCollapsed,
+                imeReplaceMode = imeReplaceMode,
+                imeAutoNext = imeAutoNext,
             )
         } catch (_: Exception) {
             null

@@ -196,4 +196,36 @@ class PromptBatchRepositoryTest {
         assertEquals(0, repo.batchState.value.currentIndex)
         assertTrue(repo.batchState.value.copiedIndices.isEmpty())
     }
+
+    @Test
+    fun `auto-next advances after insert without wrap-around and persists IME preferences`() {
+        val stateFile = File(tempFolder.root, "ime_prefs_state.json")
+        val repo = DefaultPromptBatchRepository(FileBatchPersistence(stateFile))
+        repo.loadFromRawText("===PROMPT===\nOne\n===PROMPT===\nTwo")
+
+        // Default IME prefs: replaceMode = true, autoNext = false
+        assertTrue(repo.imePrefs.value.replaceMode)
+        assertFalse(repo.imePrefs.value.autoNext)
+
+        // Manual mode (autoAdvance = false) stays on slot #1 and marks inserted
+        assertEquals("One", repo.markCurrentInserted(autoAdvance = false))
+        assertEquals(0, repo.batchState.value.currentIndex)
+        assertEquals("Inserted ✅ #1/2", repo.batchState.value.insertButtonLabel())
+
+        // Auto-Next ON advances from #1 -> #2, and stops cleanly at #2 (no wrap-around)
+        repo.setImeReplaceMode(false)
+        repo.setImeAutoNext(true)
+        assertEquals("One", repo.markCurrentInserted(autoAdvance = true))
+        assertEquals(1, repo.batchState.value.currentIndex)
+        assertEquals("Two", repo.markCurrentInserted(autoAdvance = true))
+        assertEquals(1, repo.batchState.value.currentIndex) // no wrap-around at #N
+        assertEquals(setOf(0, 1), repo.batchState.value.copiedIndices)
+
+        // Restart restores both IME prefs and shared batch state
+        val restarted = DefaultPromptBatchRepository(FileBatchPersistence(stateFile))
+        assertFalse(restarted.imePrefs.value.replaceMode)
+        assertTrue(restarted.imePrefs.value.autoNext)
+        assertEquals(1, restarted.batchState.value.currentIndex)
+        assertEquals(setOf(0, 1), restarted.batchState.value.copiedIndices)
+    }
 }

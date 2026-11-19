@@ -56,6 +56,20 @@
                 android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
                 android:value="Floating prompt clipboard overlay" />
         </service>
+
+        <!-- Banking-app-safe Mini-Keyboard for 1-tap auto-insert at cursor (ZERO Accessibility) -->
+        <service
+            android:name=".ime.PromptShiftImeService"
+            android:exported="true"
+            android:label="@string/ime_label"
+            android:permission="android.permission.BIND_INPUT_METHOD">
+            <intent-filter>
+                <action android:name="android.view.InputMethod" />
+            </intent-filter>
+            <meta-data
+                android:name="android.view.im"
+                android:resource="@xml/promptshift_ime_method" />
+        </service>
     </application>
 
 </manifest>
