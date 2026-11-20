@@ -13,16 +13,24 @@ import android.util.TypedValue
 import android.view.Gravity
 import android.view.HapticFeedbackConstants
 import android.view.View
+import android.widget.HorizontalScrollView
 import android.widget.LinearLayout
 import android.widget.TextView
+import com.promptshift.app.domain.AiConfigState
 import com.promptshift.app.domain.GenerationState
 import com.promptshift.app.domain.ImePrefsState
 import com.promptshift.app.domain.OverlayFeedback
 import com.promptshift.app.domain.PromptBatchState
+import com.promptshift.app.domain.PromptSnippet
+import com.promptshift.app.timer.TimerState
 import kotlin.math.roundToInt
 
 /**
  * Compact GT Carbon & Crimson Mini-Keyboard view controller for PromptShift Auto-Insert.
+ * Phase 4 adds:
+ * - Trigger-Word-synced 2,000-char counter
+ * - Live [⏱] countdown timer pill
+ * - Scrollable Saved Snippets & Recent 10 chip strip with [Snip: + / Rep] mode toggle
  */
 class PromptShiftImeViewController(
     private val context: Context,
@@ -30,8 +38,13 @@ class PromptShiftImeViewController(
     private val onAiClicked: () -> Unit,
     private val onCancelStreamClicked: () -> Unit,
     private val onLoadClicked: () -> Unit,
+    private val onTimerClicked: () -> Unit,
     private val onToggleReplaceMode: () -> Unit,
     private val onToggleAutoNext: () -> Unit,
+    private val onToggleSnippetReplaceMode: () -> Unit,
+    private val onSnippetClicked: (PromptSnippet) -> Unit,
+    private val onRecentClicked: (String) -> Unit,
+    private val onSaveCurrentSlotClicked: () -> Unit,
     private val onHideKeyboardClicked: () -> Unit,
     private val onPreviousClicked: () -> Unit,
     private val onInsertClicked: () -> Unit,
@@ -42,16 +55,23 @@ class PromptShiftImeViewController(
     private val density = context.resources.displayMetrics.density
 
     private var aiButton: TextView? = null
+    private var timerButton: TextView? = null
     private var modeButton: TextView? = null
     private var autoNextButton: TextView? = null
     private var statusCountText: TextView? = null
+    private var snippetStripRow: LinearLayout? = null
+    private var snippetModeButton: TextView? = null
+    private var saveSlotChipButton: TextView? = null
+    private var snippetChipsContainer: LinearLayout? = null
     private var prevButton: TextView? = null
     private var insertButton: TextView? = null
     private var nextButton: TextView? = null
 
     private var latestBatch = PromptBatchState()
     private var latestPrefs = ImePrefsState()
+    private var latestConfig = AiConfigState()
     private var latestGeneration: GenerationState = GenerationState.Idle
+    private var latestTimer = TimerState()
     private var activeFeedback: OverlayFeedback? = null
 
     private val feedbackTimeout = Runnable {
@@ -85,7 +105,7 @@ class PromptShiftImeViewController(
             )
         }
 
-        // Row 1: [🌐] [AI] [Load] [Replace] [Auto>]  1840/2000  [⌄]
+        // Row 1: [🌐] [AI] [Load] [⏱] [Rep] [Auto>]  1840/2000  [⌄]
         val topRow = LinearLayout(context).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
@@ -99,7 +119,7 @@ class PromptShiftImeViewController(
             performHaptic(view)
             onSwitchKeyboardClicked()
         }.apply {
-            (layoutParams as LinearLayout.LayoutParams).marginEnd = dp(5)
+            (layoutParams as LinearLayout.LayoutParams).marginEnd = dp(4)
         }
 
         val aiBtn = makeSmallChip("AI", "Quick Direction AI Generate") { view ->
@@ -110,7 +130,7 @@ class PromptShiftImeViewController(
                 onAiClicked()
             }
         }.apply {
-            (layoutParams as LinearLayout.LayoutParams).marginEnd = dp(5)
+            (layoutParams as LinearLayout.LayoutParams).marginEnd = dp(4)
         }
         aiButton = aiBtn
 
@@ -118,14 +138,22 @@ class PromptShiftImeViewController(
             performHaptic(view)
             onLoadClicked()
         }.apply {
-            (layoutParams as LinearLayout.LayoutParams).marginEnd = dp(5)
+            (layoutParams as LinearLayout.LayoutParams).marginEnd = dp(4)
         }
 
-        val modeBtn = makeSmallChip("Replace", "Toggle Replace or Append mode") { view ->
+        val timerBtn = makeSmallChip("⏱", "Countdown Timer") { view ->
+            performHaptic(view)
+            onTimerClicked()
+        }.apply {
+            (layoutParams as LinearLayout.LayoutParams).marginEnd = dp(4)
+        }
+        timerButton = timerBtn
+
+        val modeBtn = makeSmallChip("Rep", "Toggle Replace or Append mode") { view ->
             performHaptic(view)
             onToggleReplaceMode()
         }.apply {
-            (layoutParams as LinearLayout.LayoutParams).marginEnd = dp(5)
+            (layoutParams as LinearLayout.LayoutParams).marginEnd = dp(4)
         }
         modeButton = modeBtn
 
@@ -133,20 +161,20 @@ class PromptShiftImeViewController(
             performHaptic(view)
             onToggleAutoNext()
         }.apply {
-            (layoutParams as LinearLayout.LayoutParams).marginEnd = dp(5)
+            (layoutParams as LinearLayout.LayoutParams).marginEnd = dp(4)
         }
         autoNextButton = autoBtn
 
         val statusTv = TextView(context).apply {
             text = "0/2000"
-            setTextSize(TypedValue.COMPLEX_UNIT_SP, 10.5f)
+            setTextSize(TypedValue.COMPLEX_UNIT_SP, 10f)
             setTextColor(TEXT_MUTED)
             typeface = Typeface.MONOSPACE
             gravity = Gravity.END or Gravity.CENTER_VERTICAL
             maxLines = 1
             ellipsize = TextUtils.TruncateAt.END
             layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f).apply {
-                marginEnd = dp(5)
+                marginEnd = dp(4)
             }
         }
         statusCountText = statusTv
@@ -159,12 +187,58 @@ class PromptShiftImeViewController(
         topRow.addView(switchKbBtn)
         topRow.addView(aiBtn)
         topRow.addView(loadBtn)
+        topRow.addView(timerBtn)
         topRow.addView(modeBtn)
         topRow.addView(autoBtn)
         topRow.addView(statusTv)
         topRow.addView(hideBtn)
 
-        // Row 2: [ < ]  [ Insert #3/20 ]  [⌫]  [ > ]
+        // Row 2: [Snip: +] [+Snip] | Scrollable Saved Snippets & Recent 10 chips
+        val snipRow = LinearLayout(context).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT,
+            ).apply {
+                topMargin = dp(6)
+            }
+        }
+        snippetStripRow = snipRow
+
+        val snipModeBtn = makeSmallChip("Snip:+", "Toggle Snippet Append or Replace mode") { view ->
+            performHaptic(view)
+            onToggleSnippetReplaceMode()
+        }.apply {
+            (layoutParams as LinearLayout.LayoutParams).marginEnd = dp(5)
+        }
+        snippetModeButton = snipModeBtn
+
+        val saveSlotBtn = makeSmallChip("+Snip", "Save current slot as snippet") { view ->
+            performHaptic(view)
+            onSaveCurrentSlotClicked()
+        }.apply {
+            (layoutParams as LinearLayout.LayoutParams).marginEnd = dp(5)
+        }
+        saveSlotChipButton = saveSlotBtn
+
+        val chipsContainer = LinearLayout(context).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+        }
+        snippetChipsContainer = chipsContainer
+
+        val chipScroller = HorizontalScrollView(context).apply {
+            isHorizontalScrollBarEnabled = false
+            layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+            addView(chipsContainer)
+        }
+
+        snipRow.addView(snipModeBtn)
+        snipRow.addView(saveSlotBtn)
+        snipRow.addView(chipScroller)
+
+        // Row 3: [ < ]  [ Insert #3/20 ]  [⌫]  [ > ]
         val bottomRow = LinearLayout(context).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
@@ -226,6 +300,7 @@ class PromptShiftImeViewController(
         bottomRow.addView(nextBtn)
 
         card.addView(topRow)
+        card.addView(snipRow)
         card.addView(bottomRow)
         outer.addView(card)
 
@@ -243,8 +318,19 @@ class PromptShiftImeViewController(
         render()
     }
 
+    fun renderAiConfig(config: AiConfigState) {
+        latestConfig = config
+        rebuildSnippetChips()
+        render()
+    }
+
     fun renderGenerationState(generationState: GenerationState) {
         latestGeneration = generationState
+        render()
+    }
+
+    fun renderTimerState(timerState: TimerState) {
+        latestTimer = timerState
         render()
     }
 
@@ -259,10 +345,56 @@ class PromptShiftImeViewController(
         mainHandler.removeCallbacks(feedbackTimeout)
     }
 
+    private fun rebuildSnippetChips() {
+        val container = snippetChipsContainer ?: return
+        container.removeAllViews()
+
+        val snippets = latestConfig.snippets
+        val recents = latestConfig.recentPrompts
+
+        if (snippets.isEmpty() && recents.isEmpty()) {
+            val hint = TextView(context).apply {
+                text = "Save snippets in Hub or tap +Snip"
+                setTextSize(TypedValue.COMPLEX_UNIT_SP, 10.5f)
+                setTextColor(TEXT_MUTED)
+                setPadding(dp(4), 0, dp(4), 0)
+            }
+            container.addView(hint)
+            return
+        }
+
+        snippets.forEach { snippet ->
+            val label = "📌 ${snippet.title.take(16)}"
+            val chip = makeSnippetChip(
+                label = label,
+                isSavedSnippet = true,
+            ) { view ->
+                performHaptic(view)
+                onSnippetClicked(snippet)
+            }
+            container.addView(chip)
+        }
+
+        recents.forEach { recentText ->
+            val compact = recentText.replace('\n', ' ').trim()
+            val label = "↺ ${compact.take(16)}${if (compact.length > 16) "…" else ""}"
+            val chip = makeSnippetChip(
+                label = label,
+                isSavedSnippet = false,
+            ) { view ->
+                performHaptic(view)
+                onRecentClicked(recentText)
+            }
+            container.addView(chip)
+        }
+    }
+
     private fun render() {
         val state = latestBatch
         val prefs = latestPrefs
         val genState = latestGeneration
+        val timerState = latestTimer
+        val activeTrigger = latestConfig.effectiveTriggerWord
         val isStreaming = genState is GenerationState.Streaming
 
         aiButton?.let { btn ->
@@ -277,8 +409,29 @@ class PromptShiftImeViewController(
             }
         }
 
+        timerButton?.let { btn ->
+            btn.text = timerState.chipLabel()
+            when {
+                timerState.isRunning -> {
+                    btn.setTextColor(COPIED_EMERALD)
+                    btn.typeface = Typeface.MONOSPACE
+                    btn.background = makeButtonBg(COPIED_EMERALD_SURFACE, COPIED_EMERALD_SURFACE_PRESSED, COPIED_EMERALD, 8f)
+                }
+                timerState.isFinished -> {
+                    btn.setTextColor(TEXT_PRIMARY)
+                    btn.typeface = Typeface.DEFAULT_BOLD
+                    btn.background = makeButtonBg(GT_CRIMSON, GT_CRIMSON_GLOW, GT_CRIMSON_GLOW, 8f)
+                }
+                else -> {
+                    btn.setTextColor(TEXT_PRIMARY)
+                    btn.typeface = Typeface.DEFAULT_BOLD
+                    btn.background = makeButtonBg(CARBON_CHIP, CARBON_CHIP_PRESSED, METAL_BORDER, 8f)
+                }
+            }
+        }
+
         modeButton?.let { btn ->
-            btn.text = if (prefs.replaceMode) "Replace" else "Append"
+            btn.text = if (prefs.replaceMode) "Rep" else "App"
             btn.setTextColor(if (prefs.replaceMode) TEXT_PRIMARY else TEXT_MUTED)
             btn.background = makeButtonBg(
                 fill = if (prefs.replaceMode) CARBON_CHIP else OBSIDIAN_BG,
@@ -304,16 +457,35 @@ class PromptShiftImeViewController(
             }
         }
 
+        snippetModeButton?.let { btn ->
+            btn.text = if (prefs.snippetReplaceMode) "Snip:Rep" else "Snip:+"
+            if (prefs.snippetReplaceMode) {
+                btn.setTextColor(TEXT_PRIMARY)
+                btn.background = makeButtonBg(CARBON_CHIP, CARBON_CHIP_PRESSED, GT_CRIMSON, 8f)
+            } else {
+                btn.setTextColor(TEXT_MUTED)
+                btn.background = makeButtonBg(OBSIDIAN_BG, CARBON_CHIP_PRESSED, METAL_BORDER, 8f)
+            }
+        }
+
+        saveSlotChipButton?.visibility = if (state.isEmpty) View.GONE else View.VISIBLE
+
+        val hasAnyChipsOrBatch = !state.isEmpty ||
+            latestConfig.snippets.isNotEmpty() ||
+            latestConfig.recentPrompts.isNotEmpty()
+        snippetStripRow?.visibility = if (hasAnyChipsOrBatch) View.VISIBLE else View.GONE
+
         statusCountText?.let { tv ->
             val fb = activeFeedback
+            val exceedsQuota = state.isCurrentExceedingQuota(activeTrigger)
             when {
                 fb != null -> {
                     tv.text = fb.message
                     tv.setTextColor(if (fb.isError) QUOTA_WARN_RED else COPIED_EMERALD)
                     tv.setTypeface(Typeface.DEFAULT_BOLD)
                 }
-                state.isCurrentExceedingQuota -> {
-                    tv.text = state.charCountLabel()
+                exceedsQuota -> {
+                    tv.text = state.charCountLabel(activeTrigger)
                     tv.setTextColor(QUOTA_WARN_RED)
                     tv.setTypeface(Typeface.MONOSPACE, Typeface.BOLD)
                 }
@@ -323,8 +495,8 @@ class PromptShiftImeViewController(
                     tv.setTypeface(Typeface.MONOSPACE, Typeface.BOLD)
                 }
                 else -> {
-                    tv.text = state.charCountLabel()
-                    tv.setTextColor(TEXT_MUTED)
+                    tv.text = state.charCountLabel(activeTrigger)
+                    tv.setTextColor(if (activeTrigger != null && !state.isEmpty) COPIED_EMERALD else TEXT_MUTED)
                     tv.setTypeface(Typeface.MONOSPACE, Typeface.NORMAL)
                 }
             }
@@ -374,17 +546,46 @@ class PromptShiftImeViewController(
     private fun makeSmallChip(label: String, description: String, onClick: (View) -> Unit): TextView {
         return TextView(context).apply {
             text = label
-            setTextSize(TypedValue.COMPLEX_UNIT_SP, 11f)
+            setTextSize(TypedValue.COMPLEX_UNIT_SP, 10.5f)
             setTextColor(TEXT_PRIMARY)
             typeface = Typeface.DEFAULT_BOLD
             gravity = Gravity.CENTER
             contentDescription = description
-            setPadding(dp(7), 0, dp(7), 0)
+            setPadding(dp(6), 0, dp(6), 0)
             background = makeButtonBg(CARBON_CHIP, CARBON_CHIP_PRESSED, METAL_BORDER, 8f)
             layoutParams = LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.WRAP_CONTENT,
-                dp(30),
+                dp(28),
             )
+            setOnClickListener(onClick)
+        }
+    }
+
+    private fun makeSnippetChip(
+        label: String,
+        isSavedSnippet: Boolean,
+        onClick: (View) -> Unit,
+    ): TextView {
+        return TextView(context).apply {
+            text = label
+            setTextSize(TypedValue.COMPLEX_UNIT_SP, 10.5f)
+            setTextColor(if (isSavedSnippet) TEXT_PRIMARY else TEXT_MUTED)
+            typeface = if (isSavedSnippet) Typeface.DEFAULT_BOLD else Typeface.DEFAULT
+            gravity = Gravity.CENTER
+            maxLines = 1
+            setPadding(dp(8), 0, dp(8), 0)
+            background = makeButtonBg(
+                fill = if (isSavedSnippet) CARBON_CHIP else OBSIDIAN_BG,
+                pressed = CARBON_CHIP_PRESSED,
+                stroke = if (isSavedSnippet) METAL_BORDER_LIGHT else METAL_BORDER,
+                radiusDp = 8f,
+            )
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.WRAP_CONTENT,
+                dp(28),
+            ).apply {
+                marginEnd = dp(5)
+            }
             setOnClickListener(onClick)
         }
     }

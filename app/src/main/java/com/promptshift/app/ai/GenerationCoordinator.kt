@@ -73,6 +73,8 @@ class GenerationCoordinator(
                     instruction = instruction,
                     direction = direction,
                     promptCount = safeCount,
+                    reasoningEffort = config.reasoningEffort,
+                    activeTriggerWord = config.effectiveTriggerWord,
                     onPromptCompleted = { prompt ->
                         unlocked = batchRepository.appendStreamedPrompt(prompt)
                         _generationState.value = GenerationState.Streaming(
@@ -120,5 +122,24 @@ class GenerationCoordinator(
         val apiKey = configRepository.getApiKey(providerId)?.takeIf { it.isNotBlank() }
             ?: return ConnectionTestResult.Failure("Save an API key for ${provider.name} first")
         return streamingClient.testConnection(provider, apiKey)
+    }
+
+    suspend fun fetchModelsForProvider(providerId: String): com.promptshift.app.domain.FetchModelsResult {
+        val provider = configRepository.configState.value.providers.firstOrNull { it.id == providerId }
+            ?: return com.promptshift.app.domain.FetchModelsResult.Failure("Provider profile not found")
+        val apiKey = configRepository.getApiKey(providerId)?.takeIf { it.isNotBlank() }
+            ?: return com.promptshift.app.domain.FetchModelsResult.Failure("Save an API key for ${provider.name} first")
+        return streamingClient.fetchModels(provider.baseUrl, apiKey)
+    }
+
+    suspend fun fetchModelsRaw(
+        baseUrl: String,
+        apiKeyInput: String?,
+        existingProviderId: String?,
+    ): com.promptshift.app.domain.FetchModelsResult {
+        val resolvedKey = apiKeyInput?.trim()?.takeIf { it.isNotEmpty() }
+            ?: existingProviderId?.let { configRepository.getApiKey(it)?.takeIf { k -> k.isNotBlank() } }
+            ?: return com.promptshift.app.domain.FetchModelsResult.Failure("Enter or save an API key first")
+        return streamingClient.fetchModels(baseUrl, resolvedKey)
     }
 }

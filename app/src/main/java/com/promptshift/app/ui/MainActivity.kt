@@ -24,8 +24,9 @@ import com.promptshift.app.PromptShiftApp
 import com.promptshift.app.clipboard.ClipboardHelper
 import com.promptshift.app.domain.BatchLoadResult
 import com.promptshift.app.domain.ConnectionTestResult
-import com.promptshift.app.domain.InstructionImportResult
 import com.promptshift.app.domain.PromptFormatGuide
+import com.promptshift.app.domain.PromptTextComposer
+import com.promptshift.app.domain.SafeBackupImportResult
 import com.promptshift.app.overlay.FloatingOverlayService
 import com.promptshift.app.ui.theme.PromptShiftTheme
 import kotlinx.coroutines.delay
@@ -53,23 +54,23 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    private val exportInstructionsLauncher = registerForActivityResult(
+    private val exportBackupLauncher = registerForActivityResult(
         ActivityResultContracts.CreateDocument("application/json"),
     ) { uri ->
         if (uri == null) return@registerForActivityResult
         try {
-            val json = PromptShiftApp.from(this).aiConfigRepository.exportInstructionsJson()
+            val json = PromptShiftApp.from(this).aiConfigRepository.exportSafeBackupJson()
             contentResolver.openOutputStream(uri)?.use { out ->
                 out.write(json.toByteArray(Charsets.UTF_8))
                 out.flush()
             }
-            showBanner("Exported Instruction Profiles (no API keys)", isError = false)
+            showBanner("Exported Safe Backup JSON (zero API keys)", isError = false)
         } catch (_: Exception) {
-            showBanner("Could not export Instruction Profiles", isError = true)
+            showBanner("Could not export Safe Backup JSON", isError = true)
         }
     }
 
-    private val importInstructionsLauncher = registerForActivityResult(
+    private val importBackupLauncher = registerForActivityResult(
         ActivityResultContracts.OpenDocument(),
     ) { uri ->
         if (uri == null) return@registerForActivityResult
@@ -78,11 +79,11 @@ class MainActivity : ComponentActivity() {
                 ?.bufferedReader(Charsets.UTF_8)
                 ?.use { it.readText() }
                 .orEmpty()
-            when (val res = PromptShiftApp.from(this).aiConfigRepository.importInstructionsJson(json)) {
-                is InstructionImportResult.Imported -> {
-                    showBanner("Imported ${res.count} instruction preset${if (res.count == 1) "" else "s"}", isError = false)
+            when (val res = PromptShiftApp.from(this).aiConfigRepository.importSafeBackupJson(json)) {
+                is SafeBackupImportResult.Imported -> {
+                    showBanner(res.summaryLabel(), isError = false)
                 }
-                is InstructionImportResult.Failed -> {
+                is SafeBackupImportResult.Failed -> {
                     showBanner(res.reason, isError = true)
                 }
             }
@@ -100,12 +101,14 @@ class MainActivity : ComponentActivity() {
         val repository = app.repository
         val aiConfigRepository = app.aiConfigRepository
         val coordinator = app.generationCoordinator
+        val timerManager = app.timerManager
 
         setContent {
             PromptShiftTheme {
                 val batchState by repository.batchState.collectAsStateWithLifecycle()
                 val aiConfig by aiConfigRepository.configState.collectAsStateWithLifecycle()
                 val generationState by coordinator.generationState.collectAsStateWithLifecycle()
+                val timerState by timerManager.state.collectAsStateWithLifecycle()
                 val isOverlayRunning by app.isOverlayRunning.collectAsStateWithLifecycle()
 
                 val uiScope = rememberCoroutineScope()
@@ -125,6 +128,7 @@ class MainActivity : ComponentActivity() {
                     batchState = batchState,
                     aiConfig = aiConfig,
                     generationState = generationState,
+                    timerState = timerState,
                     isOverlayRunning = isOverlayRunning,
                     readiness = readinessState,
                     statusBanner = bannerMessageState,
@@ -177,6 +181,22 @@ class MainActivity : ComponentActivity() {
                         repository.clearBatch()
                         showBanner("Batch cleared", isError = false)
                     },
+                    onSaveCurrentSlotAsSnippet = {
+                        val currentPrompt = batchState.currentPrompt
+                        if (!currentPrompt.isNullOrBlank()) {
+                            val autoTitle = currentPrompt.trim()
+                                .replace('\n', ' ')
+                                .take(24)
+                                .ifBlank { "Slot #${batchState.displayIndex}" }
+                            aiConfigRepository.saveSnippet(
+                                id = null,
+                                title = autoTitle,
+                                body = currentPrompt,
+                                includeTriggerWord = true,
+                            )
+                            showBanner("Saved slot #${batchState.displayIndex} as snippet 📌", isError = false)
+                        }
+                    },
                     onCopyAiInstruction = {
                         val ok = ClipboardHelper.writePlainText(
                             context = this,
@@ -189,8 +209,19 @@ class MainActivity : ComponentActivity() {
                         )
                     },
                     onSelectProvider = { aiConfigRepository.selectProvider(it) },
-                    onSaveProvider = { id, name, baseUrl, modelId, apiKeyInput ->
-                        val saved = aiConfigRepository.saveProvider(id, name, baseUrl, modelId, apiKeyInput)
+                    onSelectProviderModel = { providerId, modelId ->
+                        aiConfigRepository.selectProviderModel(providerId, modelId)
+                        showBanner("Model: $modelId", isError = false)
+                    },
+                    onSaveProvider = { id, name, baseUrl, modelId, apiKeyInput, favoriteModels ->
+                        val saved = aiConfigRepository.saveProvider(
+                            id = id,
+                            name = name,
+                            baseUrl = baseUrl,
+                            modelId = modelId,
+                            apiKeyInput = apiKeyInput,
+                            favoriteModels = favoriteModels,
+                        )
                         connectionTestResults = connectionTestResults - saved.id
                         showBanner("Saved provider ${saved.name}", isError = false)
                     },
@@ -208,6 +239,9 @@ class MainActivity : ComponentActivity() {
                             testingProviderId = null
                         }
                     },
+                    onFetchModels = { baseUrl, apiKeyInput, existingProviderId ->
+                        coordinator.fetchModelsRaw(baseUrl, apiKeyInput, existingProviderId)
+                    },
                     onSelectInstruction = { aiConfigRepository.selectInstruction(it) },
                     onSaveInstruction = { id, name, body ->
                         val saved = aiConfigRepository.saveInstruction(id, name, body)
@@ -217,11 +251,80 @@ class MainActivity : ComponentActivity() {
                         aiConfigRepository.deleteInstruction(id)
                         showBanner("Instruction removed", isError = false)
                     },
-                    onExportInstructions = {
-                        exportInstructionsLauncher.launch("promptshift-instructions.json")
+                    onSelectReasoningEffort = { effort ->
+                        aiConfigRepository.setReasoningEffort(effort)
                     },
-                    onImportInstructions = {
-                        importInstructionsLauncher.launch(arrayOf("application/json", "text/plain", "*/*"))
+                    onSetActiveTriggerWord = { rawWord, enabled ->
+                        aiConfigRepository.setActiveTriggerWord(rawWord, enabled)
+                    },
+                    onToggleTriggerEnabled = { enabled ->
+                        aiConfigRepository.setTriggerWordEnabled(enabled)
+                    },
+                    onToggleTriggerChip = { chip ->
+                        aiConfigRepository.toggleTriggerWordChip(chip)
+                    },
+                    onSaveTriggerChip = { rawWord ->
+                        if (aiConfigRepository.addTriggerWordChip(rawWord)) {
+                            showBanner("Saved Trigger Word chip", isError = false)
+                        }
+                    },
+                    onRemoveTriggerChip = { chip ->
+                        aiConfigRepository.removeTriggerWordChip(chip)
+                    },
+                    onSaveSnippet = { id, title, body, includeTrigger ->
+                        val saved = aiConfigRepository.saveSnippet(id, title, body, includeTrigger)
+                        showBanner("Saved snippet ${saved.title}", isError = false)
+                    },
+                    onDeleteSnippet = { id ->
+                        aiConfigRepository.deleteSnippet(id)
+                        showBanner("Snippet removed", isError = false)
+                    },
+                    onCopySnippet = { snippet ->
+                        val text = if (snippet.includeTriggerWord) {
+                            PromptTextComposer.applyTriggerWord(snippet.body, aiConfig.effectiveTriggerWord)
+                        } else {
+                            snippet.body.trim()
+                        }
+                        val ok = ClipboardHelper.writePlainText(this, "PromptShift Snippet", text)
+                        if (ok) aiConfigRepository.recordRecentPrompt(text)
+                        showBanner(
+                            if (ok) "Copied snippet: ${snippet.title}" else "Could not write clipboard",
+                            isError = !ok,
+                        )
+                    },
+                    onCopyRecent = { recent ->
+                        val ok = ClipboardHelper.writePlainText(this, "PromptShift Recent", recent)
+                        if (ok) aiConfigRepository.recordRecentPrompt(recent)
+                        showBanner(
+                            if (ok) "Copied recent prompt ✅" else "Could not write clipboard",
+                            isError = !ok,
+                        )
+                    },
+                    onClearRecent = {
+                        aiConfigRepository.clearRecentPrompts()
+                        showBanner("Recent 10 cleared", isError = false)
+                    },
+                    onStartTimer = { min, sec ->
+                        if (timerManager.start(min, sec)) {
+                            showBanner("Timer started (${"%02d:%02d".format(min, sec)})", isError = false)
+                        }
+                    },
+                    onCancelTimer = {
+                        timerManager.cancel()
+                        showBanner("Timer cancelled", isError = false)
+                    },
+                    onResetTimer = {
+                        timerManager.reset()
+                        showBanner("Timer reset", isError = false)
+                    },
+                    onDismissTimerAlert = {
+                        timerManager.dismissFinishedAlert()
+                    },
+                    onExportSafeBackup = {
+                        exportBackupLauncher.launch("promptshift-backup.json")
+                    },
+                    onImportSafeBackup = {
+                        importBackupLauncher.launch(arrayOf("application/json", "text/plain", "*/*"))
                     },
                     onStartGeneration = { direction, count, allowReplace ->
                         coordinator.startGeneration(

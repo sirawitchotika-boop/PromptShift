@@ -52,12 +52,17 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.promptshift.app.domain.AiConfigState
 import com.promptshift.app.domain.ConnectionTestResult
+import com.promptshift.app.domain.FetchModelsResult
 import com.promptshift.app.domain.GenerationState
 import com.promptshift.app.domain.InstructionProfile
 import com.promptshift.app.domain.PromptBatchState
 import com.promptshift.app.domain.PromptFormatGuide
+import com.promptshift.app.domain.PromptSnippet
+import com.promptshift.app.domain.PromptTextComposer
 import com.promptshift.app.domain.ProviderProfile
+import com.promptshift.app.domain.ReasoningEffort
 import com.promptshift.app.domain.StartGenerationResult
+import com.promptshift.app.timer.TimerState
 import com.promptshift.app.ui.theme.PromptShiftColors
 import kotlinx.coroutines.delay
 
@@ -66,6 +71,7 @@ fun PromptShiftHubScreen(
     batchState: PromptBatchState,
     aiConfig: AiConfigState,
     generationState: GenerationState,
+    timerState: TimerState,
     isOverlayRunning: Boolean,
     readiness: RealmeReadinessState,
     statusBanner: String?,
@@ -79,16 +85,41 @@ fun PromptShiftHubScreen(
     onSwitchKeyboard: () -> Unit,
     onLoadFromClipboard: () -> Unit,
     onClearBatch: () -> Unit,
+    onSaveCurrentSlotAsSnippet: () -> Unit,
     onCopyAiInstruction: () -> Unit,
     onSelectProvider: (String) -> Unit,
-    onSaveProvider: (id: String?, name: String, baseUrl: String, modelId: String, apiKeyInput: String?) -> Unit,
+    onSelectProviderModel: (providerId: String, modelId: String) -> Unit,
+    onSaveProvider: (
+        id: String?,
+        name: String,
+        baseUrl: String,
+        modelId: String,
+        apiKeyInput: String?,
+        favoriteModels: List<String>,
+    ) -> Unit,
     onDeleteProvider: (String) -> Unit,
     onTestProvider: (String) -> Unit,
+    onFetchModels: suspend (baseUrl: String, apiKeyInput: String?, existingProviderId: String?) -> FetchModelsResult,
     onSelectInstruction: (String?) -> Unit,
     onSaveInstruction: (id: String?, name: String, body: String) -> Unit,
     onDeleteInstruction: (String) -> Unit,
-    onExportInstructions: () -> Unit,
-    onImportInstructions: () -> Unit,
+    onSelectReasoningEffort: (ReasoningEffort) -> Unit,
+    onSetActiveTriggerWord: (String?, Boolean?) -> Unit,
+    onToggleTriggerEnabled: (Boolean) -> Unit,
+    onToggleTriggerChip: (String) -> Unit,
+    onSaveTriggerChip: (String) -> Unit,
+    onRemoveTriggerChip: (String) -> Unit,
+    onSaveSnippet: (id: String?, title: String, body: String, includeTriggerWord: Boolean) -> Unit,
+    onDeleteSnippet: (String) -> Unit,
+    onCopySnippet: (PromptSnippet) -> Unit,
+    onCopyRecent: (String) -> Unit,
+    onClearRecent: () -> Unit,
+    onStartTimer: (minutes: Int, seconds: Int) -> Unit,
+    onCancelTimer: () -> Unit,
+    onResetTimer: () -> Unit,
+    onDismissTimerAlert: () -> Unit,
+    onExportSafeBackup: () -> Unit,
+    onImportSafeBackup: () -> Unit,
     onStartGeneration: (direction: String, count: Int, allowReplace: Boolean) -> StartGenerationResult,
     onCancelGeneration: () -> Unit,
 ) {
@@ -97,6 +128,8 @@ fun PromptShiftHubScreen(
     var editingProvider by remember { mutableStateOf<ProviderProfile?>(null) }
     var showInstructionDialog by remember { mutableStateOf(false) }
     var editingInstruction by remember { mutableStateOf<InstructionProfile?>(null) }
+    var showSnippetDialog by remember { mutableStateOf(false) }
+    var editingSnippet by remember { mutableStateOf<PromptSnippet?>(null) }
 
     LaunchedEffect(awaitingClearConfirm) {
         if (awaitingClearConfirm) {
@@ -156,12 +189,24 @@ fun PromptShiftHubScreen(
                 onSwitchKeyboard = onSwitchKeyboard,
             )
 
-            // 4. Direct AI Generate Card (Phase 2)
+            // 4. Trigger Word Card (Phase 4 — pinned before every Copy & Insert)
+            TriggerWordCard(
+                aiConfig = aiConfig,
+                onSetActiveTriggerWord = onSetActiveTriggerWord,
+                onToggleTriggerEnabled = onToggleTriggerEnabled,
+                onToggleTriggerChip = onToggleTriggerChip,
+                onSaveTriggerChip = onSaveTriggerChip,
+                onRemoveTriggerChip = onRemoveTriggerChip,
+            )
+
+            // 5. Direct AI Generate Card (Phase 2 + Phase 4 Fav Models, Efforts, Snippet append)
             DirectAiGenerateCard(
                 aiConfig = aiConfig,
                 generationState = generationState,
                 onSelectProvider = onSelectProvider,
+                onSelectProviderModel = onSelectProviderModel,
                 onSelectInstruction = onSelectInstruction,
+                onSelectReasoningEffort = onSelectReasoningEffort,
                 onAddProviderClick = {
                     editingProvider = null
                     showProviderDialog = true
@@ -170,7 +215,51 @@ fun PromptShiftHubScreen(
                 onCancelGeneration = onCancelGeneration,
             )
 
-            // 5. Providers & Instruction Profiles Manager Card (Phase 2)
+            // 6. Active Batch Card (v1 manual clipboard load + clear + Phase 4 [+Snippet] & Trigger Word sync)
+            ActiveBatchCard(
+                batchState = batchState,
+                activeTriggerWord = aiConfig.effectiveTriggerWord,
+                isStreaming = generationState.isStreaming,
+                awaitingClearConfirm = awaitingClearConfirm,
+                onLoadFromClipboard = onLoadFromClipboard,
+                onSaveCurrentSlotAsSnippet = onSaveCurrentSlotAsSnippet,
+                onClearClick = {
+                    if (awaitingClearConfirm) {
+                        awaitingClearConfirm = false
+                        onClearBatch()
+                    } else {
+                        awaitingClearConfirm = true
+                    }
+                },
+            )
+
+            // 7. Snippets & Recent 10 Card (Phase 4)
+            SnippetsAndRecentCard(
+                aiConfig = aiConfig,
+                onAddSnippet = {
+                    editingSnippet = null
+                    showSnippetDialog = true
+                },
+                onEditSnippet = { snippet ->
+                    editingSnippet = snippet
+                    showSnippetDialog = true
+                },
+                onDeleteSnippet = onDeleteSnippet,
+                onCopySnippet = onCopySnippet,
+                onCopyRecent = onCopyRecent,
+                onClearRecent = onClearRecent,
+            )
+
+            // 8. Simple Countdown Timer Card (Phase 4)
+            CountdownTimerCard(
+                timerState = timerState,
+                onStartTimer = onStartTimer,
+                onCancelTimer = onCancelTimer,
+                onResetTimer = onResetTimer,
+                onDismissAlert = onDismissTimerAlert,
+            )
+
+            // 9. Providers & Instruction Profiles Manager Card (Phase 2 + Phase 4 Expand/Collapse & Backup v2)
             ProfilesManagerCard(
                 aiConfig = aiConfig,
                 testingProviderId = testingProviderId,
@@ -196,34 +285,18 @@ fun PromptShiftHubScreen(
                     showInstructionDialog = true
                 },
                 onDeleteInstruction = onDeleteInstruction,
-                onExportInstructions = onExportInstructions,
-                onImportInstructions = onImportInstructions,
+                onExportSafeBackup = onExportSafeBackup,
+                onImportSafeBackup = onImportSafeBackup,
             )
 
-            // 6. Active Batch Card (v1 manual clipboard load + clear preserved 100%)
-            ActiveBatchCard(
-                batchState = batchState,
-                isStreaming = generationState.isStreaming,
-                awaitingClearConfirm = awaitingClearConfirm,
-                onLoadFromClipboard = onLoadFromClipboard,
-                onClearClick = {
-                    if (awaitingClearConfirm) {
-                        awaitingClearConfirm = false
-                        onClearBatch()
-                    } else {
-                        awaitingClearConfirm = true
-                    }
-                },
-            )
-
-            // 7. AI Format Helper Card
+            // 10. AI Format Helper Card
             AiFormatHelperCard(
                 onCopyAiInstruction = onCopyAiInstruction,
             )
 
             // Subtle safety footer
             Text(
-                text = "Copy-only clipboard helper • Banking-app safe",
+                text = "Copy-only & Keyboard Auto-Insert • Banking-app safe",
                 color = PromptShiftColors.TextMuted.copy(alpha = 0.72f),
                 fontSize = 11.5.sp,
                 modifier = Modifier
@@ -237,8 +310,9 @@ fun PromptShiftHubScreen(
         ProviderProfileEditorDialog(
             initial = editingProvider,
             onDismiss = { showProviderDialog = false },
-            onSave = { id, name, baseUrl, modelId, apiKey ->
-                onSaveProvider(id, name, baseUrl, modelId, apiKey)
+            onFetchModels = onFetchModels,
+            onSave = { id, name, baseUrl, modelId, apiKey, favoriteModels ->
+                onSaveProvider(id, name, baseUrl, modelId, apiKey, favoriteModels)
                 showProviderDialog = false
             },
         )
@@ -251,6 +325,17 @@ fun PromptShiftHubScreen(
             onSave = { id, name, body ->
                 onSaveInstruction(id, name, body)
                 showInstructionDialog = false
+            },
+        )
+    }
+
+    if (showSnippetDialog) {
+        SnippetEditorDialog(
+            initial = editingSnippet,
+            onDismiss = { showSnippetDialog = false },
+            onSave = { id, title, body, includeTrigger ->
+                onSaveSnippet(id, title, body, includeTrigger)
+                showSnippetDialog = false
             },
         )
     }
@@ -507,7 +592,9 @@ private fun DirectAiGenerateCard(
     aiConfig: AiConfigState,
     generationState: GenerationState,
     onSelectProvider: (String) -> Unit,
+    onSelectProviderModel: (providerId: String, modelId: String) -> Unit,
     onSelectInstruction: (String?) -> Unit,
+    onSelectReasoningEffort: (ReasoningEffort) -> Unit,
     onAddProviderClick: () -> Unit,
     onStartGeneration: (String, Int, Boolean) -> StartGenerationResult,
     onCancelGeneration: () -> Unit,
@@ -588,6 +675,19 @@ private fun DirectAiGenerateCard(
                     }
                 }
 
+                val activeProvider = aiConfig.activeProvider
+                if (activeProvider != null && activeProvider.allSelectableModels.isNotEmpty()) {
+                    CompactSelectorSection(label = "FAVORITE MODEL") {
+                        activeProvider.allSelectableModels.forEach { model ->
+                            SelectablePillChip(
+                                label = model,
+                                selected = model == activeProvider.modelId,
+                                onClick = { onSelectProviderModel(activeProvider.id, model) },
+                            )
+                        }
+                    }
+                }
+
                 CompactSelectorSection(label = "INSTRUCTION PRESET") {
                     SelectablePillChip(
                         label = "None",
@@ -599,6 +699,16 @@ private fun DirectAiGenerateCard(
                             label = inst.name,
                             selected = inst.id == aiConfig.activeInstructionId,
                             onClick = { onSelectInstruction(inst.id) },
+                        )
+                    }
+                }
+
+                CompactSelectorSection(label = "REASONING EFFORT") {
+                    ReasoningEffort.entries.forEach { effort ->
+                        SelectablePillChip(
+                            label = effort.label,
+                            selected = aiConfig.reasoningEffort == effort,
+                            onClick = { onSelectReasoningEffort(effort) },
                         )
                     }
                 }
@@ -665,6 +775,21 @@ private fun DirectAiGenerateCard(
                     colors = darkInputColors(),
                     shape = RoundedCornerShape(12.dp),
                 )
+
+                if (aiConfig.snippets.isNotEmpty()) {
+                    CompactSelectorSection(label = "TAP SNIPPET TO APPEND") {
+                        aiConfig.snippets.forEach { snippet ->
+                            SelectablePillChip(
+                                label = "+ ${snippet.title}",
+                                selected = false,
+                                onClick = {
+                                    direction = PromptTextComposer.appendToDraft(direction, snippet.body)
+                                    inlineError = null
+                                },
+                            )
+                        }
+                    }
+                }
 
                 // Live streaming progress
                 when (generationState) {
@@ -822,10 +947,16 @@ private fun ProfilesManagerCard(
     onAddInstruction: () -> Unit,
     onEditInstruction: (InstructionProfile) -> Unit,
     onDeleteInstruction: (String) -> Unit,
-    onExportInstructions: () -> Unit,
-    onImportInstructions: () -> Unit,
+    onExportSafeBackup: () -> Unit,
+    onImportSafeBackup: () -> Unit,
 ) {
     var selectedTab by remember { mutableIntStateOf(0) } // 0 = Providers, 1 = Instructions
+    var expandedInstructionIds by remember { mutableStateOf(emptySet<String>()) }
+
+    val canExportBackup = aiConfig.instructions.isNotEmpty() ||
+        aiConfig.snippets.isNotEmpty() ||
+        aiConfig.triggerWords.isNotEmpty() ||
+        aiConfig.providers.any { it.favoriteModels.isNotEmpty() }
 
     CarbonCard {
         Row(
@@ -914,6 +1045,14 @@ private fun ProfilesManagerCard(
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis,
                             )
+                            if (provider.favoriteModels.isNotEmpty()) {
+                                Text(
+                                    text = "★ ${provider.favoriteModels.size} favorite model${if (provider.favoriteModels.size == 1) "" else "s"} saved",
+                                    color = PromptShiftColors.CopiedEmerald,
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.SemiBold,
+                                )
+                            }
                             if (testResult != null) {
                                 val (msg, color) = when (testResult) {
                                     is ConnectionTestResult.Success ->
@@ -938,7 +1077,7 @@ private fun ProfilesManagerCard(
                                     onClick = { onTestProvider(provider.id) },
                                 )
                                 MiniActionChip(
-                                    label = "Edit",
+                                    label = "Models / Edit",
                                     onClick = { onEditProvider(provider) },
                                 )
                                 MiniActionChip(
@@ -978,6 +1117,7 @@ private fun ProfilesManagerCard(
                 } else {
                     aiConfig.instructions.forEach { inst ->
                         val isActive = inst.id == aiConfig.activeInstructionId
+                        val isExpanded = inst.id in expandedInstructionIds
                         Column(
                             modifier = Modifier
                                 .fillMaxWidth()
@@ -1019,13 +1159,24 @@ private fun ProfilesManagerCard(
                                 text = inst.body,
                                 color = PromptShiftColors.TextMuted,
                                 fontSize = 11.5.sp,
-                                maxLines = 2,
+                                lineHeight = 16.5.sp,
+                                maxLines = if (isExpanded) Int.MAX_VALUE else 2,
                                 overflow = TextOverflow.Ellipsis,
                             )
                             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                                 MiniActionChip(
                                     label = if (isActive) "Unselect" else "Use",
                                     onClick = { onSelectInstruction(if (isActive) null else inst.id) },
+                                )
+                                MiniActionChip(
+                                    label = if (isExpanded) "Collapse ▴" else "Expand ▾",
+                                    onClick = {
+                                        expandedInstructionIds = if (isExpanded) {
+                                            expandedInstructionIds - inst.id
+                                        } else {
+                                            expandedInstructionIds + inst.id
+                                        }
+                                    },
                                 )
                                 MiniActionChip(
                                     label = "Edit",
@@ -1061,8 +1212,8 @@ private fun ProfilesManagerCard(
                     horizontalArrangement = Arrangement.spacedBy(10.dp),
                 ) {
                     OutlinedButton(
-                        onClick = onExportInstructions,
-                        enabled = aiConfig.instructions.isNotEmpty(),
+                        onClick = onExportSafeBackup,
+                        enabled = canExportBackup,
                         modifier = Modifier
                             .weight(1f)
                             .height(40.dp),
@@ -1073,7 +1224,7 @@ private fun ProfilesManagerCard(
                         Text("Export JSON", fontSize = 12.sp, fontWeight = FontWeight.Bold)
                     }
                     OutlinedButton(
-                        onClick = onImportInstructions,
+                        onClick = onImportSafeBackup,
                         modifier = Modifier
                             .weight(1f)
                             .height(40.dp),
@@ -1085,7 +1236,7 @@ private fun ProfilesManagerCard(
                     }
                 }
                 Text(
-                    text = "Backup covers Instruction Profiles only — API keys are never exported.",
+                    text = "Safe backup covers Instruction Profiles, Saved Snippets, Trigger Word Chips, and Favorite Model IDs — API keys are never exported.",
                     color = PromptShiftColors.TextMuted.copy(alpha = 0.78f),
                     fontSize = 11.sp,
                 )
@@ -1095,7 +1246,7 @@ private fun ProfilesManagerCard(
 }
 
 @Composable
-private fun SegmentTabButton(
+internal fun SegmentTabButton(
     modifier: Modifier = Modifier,
     title: String,
     selected: Boolean,
@@ -1124,7 +1275,7 @@ private fun SegmentTabButton(
 }
 
 @Composable
-private fun MiniActionChip(
+internal fun MiniActionChip(
     label: String,
     enabled: Boolean = true,
     isDanger: Boolean = false,
@@ -1158,11 +1309,15 @@ private fun MiniActionChip(
 @Composable
 private fun ActiveBatchCard(
     batchState: PromptBatchState,
+    activeTriggerWord: String?,
     isStreaming: Boolean,
     awaitingClearConfirm: Boolean,
     onLoadFromClipboard: () -> Unit,
+    onSaveCurrentSlotAsSnippet: () -> Unit,
     onClearClick: () -> Unit,
 ) {
+    val exceedsQuota = batchState.isCurrentExceedingQuota(activeTriggerWord)
+
     CarbonCard {
         Row(
             modifier = Modifier.fillMaxWidth(),
@@ -1177,17 +1332,17 @@ private fun ActiveBatchCard(
                 letterSpacing = 1.sp,
             )
 
-            val countColor = if (batchState.isCurrentExceedingQuota) {
-                PromptShiftColors.QuotaWarnRed
-            } else {
-                PromptShiftColors.TextMuted
+            val countColor = when {
+                exceedsQuota -> PromptShiftColors.QuotaWarnRed
+                activeTriggerWord != null && !batchState.isEmpty -> PromptShiftColors.CopiedEmerald
+                else -> PromptShiftColors.TextMuted
             }
             Text(
-                text = batchState.charCountLabel(),
+                text = batchState.charCountLabel(activeTriggerWord),
                 color = countColor,
                 fontFamily = FontFamily.Monospace,
                 fontSize = 12.sp,
-                fontWeight = if (batchState.isCurrentExceedingQuota) FontWeight.Bold else FontWeight.Medium,
+                fontWeight = if (exceedsQuota) FontWeight.Bold else FontWeight.Medium,
             )
         }
 
@@ -1209,54 +1364,65 @@ private fun ActiveBatchCard(
             )
         } else {
             Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(10.dp),
             ) {
-                Text(
-                    text = "${batchState.copiedCount} / ${batchState.totalCount} copied",
-                    color = PromptShiftColors.TextPrimary,
-                    fontSize = 18.sp,
-                    fontWeight = FontWeight.Bold,
-                )
-                Box(
-                    modifier = Modifier
-                        .clip(RoundedCornerShape(8.dp))
-                        .background(
-                            if (batchState.isCurrentCopied) {
-                                PromptShiftColors.CopiedEmeraldBg
-                            } else {
-                                PromptShiftColors.CarbonElevated
-                            },
-                        )
-                        .border(
-                            1.dp,
-                            if (batchState.isCurrentCopied) {
-                                PromptShiftColors.CopiedEmerald.copy(alpha = 0.6f)
-                            } else {
-                                PromptShiftColors.MetalBorder
-                            },
-                            RoundedCornerShape(8.dp),
-                        )
-                        .padding(horizontal = 8.dp, vertical = 3.dp),
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
                 ) {
                     Text(
-                        text = if (batchState.isCurrentCopied) {
-                            "Slot #${batchState.displayIndex}/${batchState.totalCount} ✅"
-                        } else {
-                            "Slot #${batchState.displayIndex}/${batchState.totalCount}"
-                        },
-                        color = if (batchState.isCurrentCopied) {
-                            PromptShiftColors.CopiedEmerald
-                        } else {
-                            PromptShiftColors.TextMuted
-                        },
-                        fontSize = 11.5.sp,
-                        fontWeight = FontWeight.SemiBold,
+                        text = "${batchState.copiedCount} / ${batchState.totalCount} copied",
+                        color = PromptShiftColors.TextPrimary,
+                        fontSize = 18.sp,
+                        fontWeight = FontWeight.Bold,
                     )
+                    Box(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(8.dp))
+                            .background(
+                                if (batchState.isCurrentCopied) {
+                                    PromptShiftColors.CopiedEmeraldBg
+                                } else {
+                                    PromptShiftColors.CarbonElevated
+                                },
+                            )
+                            .border(
+                                1.dp,
+                                if (batchState.isCurrentCopied) {
+                                    PromptShiftColors.CopiedEmerald.copy(alpha = 0.6f)
+                                } else {
+                                    PromptShiftColors.MetalBorder
+                                },
+                                RoundedCornerShape(8.dp),
+                            )
+                            .padding(horizontal = 8.dp, vertical = 3.dp),
+                    ) {
+                        Text(
+                            text = if (batchState.isCurrentCopied) {
+                                "Slot #${batchState.displayIndex}/${batchState.totalCount} ✅"
+                            } else {
+                                "Slot #${batchState.displayIndex}/${batchState.totalCount}"
+                            },
+                            color = if (batchState.isCurrentCopied) {
+                                PromptShiftColors.CopiedEmerald
+                            } else {
+                                PromptShiftColors.TextMuted
+                            },
+                            fontSize = 11.5.sp,
+                            fontWeight = FontWeight.SemiBold,
+                        )
+                    }
                 }
+
+                MiniActionChip(
+                    label = "+Snippet",
+                    onClick = onSaveCurrentSlotAsSnippet,
+                )
             }
 
-            batchState.currentPrompt?.let { preview ->
+            batchState.effectiveCurrentPrompt(activeTriggerWord)?.let { preview ->
                 Spacer(modifier = Modifier.height(8.dp))
                 Box(
                     modifier = Modifier
@@ -1397,7 +1563,7 @@ private fun AiFormatHelperCard(
 }
 
 @Composable
-private fun CarbonCard(
+internal fun CarbonCard(
     content: @Composable () -> Unit,
 ) {
     Surface(

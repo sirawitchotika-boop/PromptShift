@@ -53,6 +53,8 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.promptshift.app.PromptShiftApp
 import com.promptshift.app.domain.AiConfigState
 import com.promptshift.app.domain.GenerationState
+import com.promptshift.app.domain.PromptTextComposer
+import com.promptshift.app.domain.ReasoningEffort
 import com.promptshift.app.domain.StartGenerationResult
 import com.promptshift.app.ui.theme.PromptShiftColors
 import com.promptshift.app.ui.theme.PromptShiftTheme
@@ -79,7 +81,13 @@ class QuickDirectionActivity : ComponentActivity() {
                     config = config,
                     generationState = genState,
                     onSelectProvider = { configRepo.selectProvider(it) },
+                    onSelectModel = { providerId, modelId ->
+                        configRepo.selectProviderModel(providerId, modelId)
+                    },
                     onSelectInstruction = { configRepo.selectInstruction(it) },
+                    onSelectReasoningEffort = { configRepo.setReasoningEffort(it) },
+                    onToggleTriggerWordChip = { configRepo.toggleTriggerWordChip(it) },
+                    onSetTriggerWordEnabled = { configRepo.setTriggerWordEnabled(it) },
                     onStartGeneration = { direction, count, allowReplace ->
                         coordinator.startGeneration(
                             direction = direction,
@@ -119,7 +127,11 @@ private fun QuickDirectionPopupContent(
     config: AiConfigState,
     generationState: GenerationState,
     onSelectProvider: (String) -> Unit,
+    onSelectModel: (providerId: String, modelId: String) -> Unit,
     onSelectInstruction: (String?) -> Unit,
+    onSelectReasoningEffort: (ReasoningEffort) -> Unit,
+    onToggleTriggerWordChip: (String) -> Unit,
+    onSetTriggerWordEnabled: (Boolean) -> Unit,
     onStartGeneration: (String, Int, Boolean) -> StartGenerationResult,
     onCancelStream: () -> Unit,
     onOpenHub: () -> Unit,
@@ -249,6 +261,20 @@ private fun QuickDirectionPopupContent(
                         }
                     }
 
+                    // Favorite AI Models 1-tap switcher
+                    val activeProvider = config.activeProvider
+                    if (activeProvider != null && activeProvider.allSelectableModels.isNotEmpty()) {
+                        CompactSelectorSection(label = "MODEL") {
+                            activeProvider.allSelectableModels.forEach { model ->
+                                SelectablePillChip(
+                                    label = model,
+                                    selected = model == activeProvider.modelId,
+                                    onClick = { onSelectModel(activeProvider.id, model) },
+                                )
+                            }
+                        }
+                    }
+
                     // Instruction profile selector (None + saved presets)
                     CompactSelectorSection(label = "INSTRUCTION") {
                         SelectablePillChip(
@@ -262,6 +288,36 @@ private fun QuickDirectionPopupContent(
                                 selected = inst.id == config.activeInstructionId,
                                 onClick = { onSelectInstruction(inst.id) },
                             )
+                        }
+                    }
+
+                    // Reasoning Effort selector
+                    CompactSelectorSection(label = "REASONING EFFORT") {
+                        ReasoningEffort.entries.forEach { effort ->
+                            SelectablePillChip(
+                                label = effort.label,
+                                selected = config.reasoningEffort == effort,
+                                onClick = { onSelectReasoningEffort(effort) },
+                            )
+                        }
+                    }
+
+                    // Trigger Word quick toggle & chips
+                    if (!config.activeTriggerWord.isNullOrBlank() || config.triggerWords.isNotEmpty()) {
+                        CompactSelectorSection(label = "TRIGGER WORD") {
+                            SelectablePillChip(
+                                label = "Off",
+                                selected = !config.triggerWordEnabled,
+                                onClick = { onSetTriggerWordEnabled(false) },
+                            )
+                            val chips = (listOfNotNull(config.activeTriggerWord) + config.triggerWords).distinct()
+                            chips.forEach { tw ->
+                                SelectablePillChip(
+                                    label = tw,
+                                    selected = config.triggerWordEnabled && config.activeTriggerWord == tw,
+                                    onClick = { onToggleTriggerWordChip(tw) },
+                                )
+                            }
                         }
                     }
 
@@ -333,6 +389,22 @@ private fun QuickDirectionPopupContent(
                         colors = darkInputColors(),
                         shape = RoundedCornerShape(12.dp),
                     )
+
+                    // Quick-append Snippets into Direction box
+                    if (config.snippets.isNotEmpty()) {
+                        CompactSelectorSection(label = "TAP SNIPPET TO APPEND") {
+                            config.snippets.forEach { snippet ->
+                                SelectablePillChip(
+                                    label = "+ ${snippet.title}",
+                                    selected = false,
+                                    onClick = {
+                                        direction = PromptTextComposer.appendToDraft(direction, snippet.body)
+                                        errorMessage = null
+                                    },
+                                )
+                            }
+                        }
+                    }
 
                     // Error banner
                     if (!errorMessage.isNullOrBlank()) {

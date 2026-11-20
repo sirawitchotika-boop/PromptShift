@@ -38,6 +38,7 @@ interface PromptBatchRepository {
     fun setCollapsed(collapsed: Boolean)
     fun setImeReplaceMode(replaceMode: Boolean)
     fun setImeAutoNext(autoNext: Boolean)
+    fun setImeSnippetReplaceMode(replaceMode: Boolean)
     fun postFeedback(message: String, isError: Boolean = false)
 }
 
@@ -87,6 +88,7 @@ class DefaultPromptBatchRepository(
             ImePrefsState(
                 replaceMode = saved.imeReplaceMode,
                 autoNext = saved.imeAutoNext,
+                snippetReplaceMode = saved.imeSnippetReplaceMode,
             )
         } else {
             ImePrefsState()
@@ -254,6 +256,14 @@ class DefaultPromptBatchRepository(
         }
     }
 
+    override fun setImeSnippetReplaceMode(replaceMode: Boolean) {
+        synchronized(lock) {
+            if (_imePrefs.value.snippetReplaceMode == replaceMode) return
+            _imePrefs.value = _imePrefs.value.copy(snippetReplaceMode = replaceMode)
+            persistLocked()
+        }
+    }
+
     override fun postFeedback(message: String, isError: Boolean) {
         _feedbackEvents.tryEmit(
             OverlayFeedback(
@@ -279,6 +289,7 @@ class DefaultPromptBatchRepository(
                 isCollapsed = overlay.isCollapsed,
                 imeReplaceMode = ime.replaceMode,
                 imeAutoNext = ime.autoNext,
+                imeSnippetReplaceMode = ime.snippetReplaceMode,
             ),
         )
     }

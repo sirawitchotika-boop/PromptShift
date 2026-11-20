@@ -7,6 +7,7 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <uses-permission android:name="android.permission.VIBRATE" />
 
     <application
         android:name=".PromptShiftApp"
@@ -38,6 +39,26 @@
             android:theme="@style/Theme.PromptShift.Dialog"
             android:windowSoftInputMode="adjustResize|stateVisible" />
 
+        <!-- Translucent Snippets & Recent 10 popup launched from the Floating Bubble -->
+        <activity
+            android:name=".ui.SnippetsPopupActivity"
+            android:excludeFromRecents="true"
+            android:exported="false"
+            android:launchMode="singleInstance"
+            android:taskAffinity=""
+            android:theme="@style/Theme.PromptShift.Dialog"
+            android:windowSoftInputMode="adjustResize" />
+
+        <!-- Translucent Countdown Timer popup launched from the Floating Bubble or Mini-Keyboard -->
+        <activity
+            android:name=".ui.TimerPopupActivity"
+            android:excludeFromRecents="true"
+            android:exported="false"
+            android:launchMode="singleInstance"
+            android:taskAffinity=""
+            android:theme="@style/Theme.PromptShift.Dialog"
+            android:windowSoftInputMode="adjustResize|stateVisible" />
+
         <!-- 1-frame transparent trampoline for Android 10+ background clipboard read -->
         <activity
             android:name=".clipboard.ClipboardTrampolineActivity"
@@ -47,6 +68,10 @@
             android:noHistory="true"
             android:taskAffinity=""
             android:theme="@style/Theme.PromptShift.Trampoline" />
+
+        <receiver
+            android:name=".timer.TimerAlertReceiver"
+            android:exported="false" />
 
         <service
             android:name=".overlay.FloatingOverlayService"

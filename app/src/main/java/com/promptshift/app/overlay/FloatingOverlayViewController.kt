@@ -25,13 +25,14 @@ import android.widget.TextView
 import com.promptshift.app.domain.GenerationState
 import com.promptshift.app.domain.OverlayFeedback
 import com.promptshift.app.domain.PromptBatchState
+import com.promptshift.app.timer.TimerState
 import kotlin.math.abs
 import kotlin.math.roundToInt
 
 /**
  * Lightweight native View controller for the GT Carbon & Crimson floating overlay.
- * Supports v1 manual Load/Copy plus Phase 2 Quick-Direction [AI] trigger, live SSE
- * progress badge, and 1-tap [Stop] stream cancellation right from the floating pill.
+ * Supports v1 manual Load/Copy, Phase 2 Quick-Direction [AI] & live SSE progress,
+ * and Phase 4 [📌] Snippets/Recent popup, [⏱] live countdown timer pill, and Trigger Word counter sync.
  */
 class FloatingOverlayViewController(
     private val context: Context,
@@ -39,6 +40,8 @@ class FloatingOverlayViewController(
     private val onAiClicked: () -> Unit,
     private val onCancelStreamClicked: () -> Unit,
     private val onLoadClicked: () -> Unit,
+    private val onSnippetsClicked: () -> Unit,
+    private val onTimerClicked: () -> Unit,
     private val onClearConfirmed: () -> Unit,
     private val onCloseClicked: () -> Unit,
     private val onPreviousClicked: () -> Unit,
@@ -57,6 +60,7 @@ class FloatingOverlayViewController(
 
     // Expanded Pill views
     private var aiButton: TextView? = null
+    private var timerButton: TextView? = null
     private var clearButton: TextView? = null
     private var statusCountText: TextView? = null
     private var prevButton: TextView? = null
@@ -73,6 +77,8 @@ class FloatingOverlayViewController(
     private var isAwaitingClearConfirm = false
     private var latestState = PromptBatchState()
     private var latestGenerationState: GenerationState = GenerationState.Idle
+    private var latestTimerState = TimerState()
+    private var activeTriggerWord: String? = null
     private var activeFeedback: OverlayFeedback? = null
     private var snapAnimator: ValueAnimator? = null
 
@@ -162,6 +168,16 @@ class FloatingOverlayViewController(
         renderUi()
     }
 
+    fun renderTimerState(timerState: TimerState) {
+        latestTimerState = timerState
+        renderUi()
+    }
+
+    fun renderActiveTriggerWord(triggerWord: String?) {
+        activeTriggerWord = triggerWord
+        renderUi()
+    }
+
     fun showFeedback(feedback: OverlayFeedback) {
         activeFeedback = feedback
         mainHandler.removeCallbacks(feedbackTimeout)
@@ -172,6 +188,8 @@ class FloatingOverlayViewController(
     private fun renderUi() {
         val state = latestState
         val genState = latestGenerationState
+        val timerState = latestTimerState
+        val trigger = activeTriggerWord
         val isStreaming = genState is GenerationState.Streaming
 
         // Update [AI] / [Stop] button
@@ -194,6 +212,43 @@ class FloatingOverlayViewController(
                     strokeColor = GT_CRIMSON,
                     radiusDp = 8f,
                 )
+            }
+        }
+
+        // Update [⏱] live countdown timer chip
+        timerButton?.let { btn ->
+            btn.text = timerState.chipLabel()
+            when {
+                timerState.isRunning -> {
+                    btn.setTextColor(COPIED_EMERALD)
+                    btn.typeface = Typeface.MONOSPACE
+                    btn.background = makeButtonBackground(
+                        fillColor = COPIED_EMERALD_SURFACE,
+                        pressedColor = COPIED_EMERALD_SURFACE_PRESSED,
+                        strokeColor = COPIED_EMERALD,
+                        radiusDp = 8f,
+                    )
+                }
+                timerState.isFinished -> {
+                    btn.setTextColor(TEXT_PRIMARY)
+                    btn.typeface = Typeface.DEFAULT_BOLD
+                    btn.background = makeButtonBackground(
+                        fillColor = GT_CRIMSON,
+                        pressedColor = GT_CRIMSON_GLOW,
+                        strokeColor = GT_CRIMSON_GLOW,
+                        radiusDp = 8f,
+                    )
+                }
+                else -> {
+                    btn.setTextColor(TEXT_PRIMARY)
+                    btn.typeface = Typeface.DEFAULT_BOLD
+                    btn.background = makeButtonBackground(
+                        fillColor = CARBON_CHIP,
+                        pressedColor = CARBON_CHIP_PRESSED,
+                        strokeColor = METAL_BORDER,
+                        radiusDp = 8f,
+                    )
+                }
             }
         }
 
@@ -226,14 +281,15 @@ class FloatingOverlayViewController(
         // Update char count / live stream / temporary feedback slot
         statusCountText?.let { tv ->
             val fb = activeFeedback
+            val exceedsQuota = state.isCurrentExceedingQuota(trigger)
             when {
                 fb != null -> {
                     tv.text = fb.message
                     tv.setTextColor(if (fb.isError) QUOTA_WARN_RED else COPIED_EMERALD)
                     tv.setTypeface(Typeface.DEFAULT_BOLD)
                 }
-                state.isCurrentExceedingQuota -> {
-                    tv.text = state.charCountLabel()
+                exceedsQuota -> {
+                    tv.text = state.charCountLabel(trigger)
                     tv.setTextColor(QUOTA_WARN_RED)
                     tv.setTypeface(Typeface.MONOSPACE, Typeface.BOLD)
                 }
@@ -243,8 +299,8 @@ class FloatingOverlayViewController(
                     tv.setTypeface(Typeface.MONOSPACE, Typeface.BOLD)
                 }
                 else -> {
-                    tv.text = state.charCountLabel()
-                    tv.setTextColor(TEXT_MUTED)
+                    tv.text = state.charCountLabel(trigger)
+                    tv.setTextColor(if (trigger != null && !state.isEmpty) COPIED_EMERALD else TEXT_MUTED)
                     tv.setTypeface(Typeface.MONOSPACE, Typeface.NORMAL)
                 }
             }
@@ -408,8 +464,25 @@ class FloatingOverlayViewController(
             performSubtleHaptic(view)
             onLoadClicked()
         }.apply {
-            (layoutParams as LinearLayout.LayoutParams).marginEnd = dp(5)
+            (layoutParams as LinearLayout.LayoutParams).marginEnd = dp(4)
         }
+
+        val snippetsBtn = makeTopChipButton("📌") { view ->
+            performSubtleHaptic(view)
+            onSnippetsClicked()
+        }.apply {
+            contentDescription = "Snippets and Recent 10"
+            (layoutParams as LinearLayout.LayoutParams).marginEnd = dp(4)
+        }
+
+        val timerBtn = makeTopChipButton("⏱") { view ->
+            performSubtleHaptic(view)
+            onTimerClicked()
+        }.apply {
+            contentDescription = "Countdown Timer"
+            (layoutParams as LinearLayout.LayoutParams).marginEnd = dp(4)
+        }
+        timerButton = timerBtn
 
         val clearBtn = makeTopChipButton("Clear") { view ->
             if (latestState.isEmpty || latestGenerationState.isStreaming) return@makeTopChipButton
@@ -425,26 +498,26 @@ class FloatingOverlayViewController(
                 renderUi()
             }
         }.apply {
-            (layoutParams as LinearLayout.LayoutParams).marginEnd = dp(6)
+            (layoutParams as LinearLayout.LayoutParams).marginEnd = dp(5)
         }
         clearButton = clearBtn
 
         val countTv = TextView(context).apply {
             text = "0/2000"
-            setTextSize(TypedValue.COMPLEX_UNIT_SP, 11f)
+            setTextSize(TypedValue.COMPLEX_UNIT_SP, 10.5f)
             setTextColor(TEXT_MUTED)
             typeface = Typeface.MONOSPACE
             gravity = Gravity.CENTER
             maxLines = 1
             ellipsize = TextUtils.TruncateAt.END
-            minWidth = dp(66)
-            maxWidth = dp(104)
+            minWidth = dp(58)
+            maxWidth = dp(96)
             setPadding(dp(2), 0, dp(2), 0)
             layoutParams = LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.WRAP_CONTENT,
                 LinearLayout.LayoutParams.WRAP_CONTENT,
             ).apply {
-                marginEnd = dp(6)
+                marginEnd = dp(5)
             }
         }
         statusCountText = countTv
@@ -472,6 +545,8 @@ class FloatingOverlayViewController(
         topRow.addView(collapseBtn)
         topRow.addView(aiBtn)
         topRow.addView(loadBtn)
+        topRow.addView(snippetsBtn)
+        topRow.addView(timerBtn)
         topRow.addView(clearBtn)
         topRow.addView(countTv)
         topRow.addView(closeBtn)

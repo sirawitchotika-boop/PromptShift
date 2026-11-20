@@ -11,6 +11,8 @@ import com.promptshift.app.data.DefaultPromptBatchRepository
 import com.promptshift.app.data.FileAiConfigPersistence
 import com.promptshift.app.data.FileBatchPersistence
 import com.promptshift.app.data.PromptBatchRepository
+import com.promptshift.app.timer.CountdownTimerManager
+import com.promptshift.app.timer.TimerAlertNotifier
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -32,6 +34,9 @@ class PromptShiftApp : Application() {
     lateinit var generationCoordinator: GenerationCoordinator
         private set
 
+    lateinit var timerManager: CountdownTimerManager
+        private set
+
     private val _isOverlayRunning = MutableStateFlow(false)
     val isOverlayRunning: StateFlow<Boolean> = _isOverlayRunning.asStateFlow()
 
@@ -51,6 +56,17 @@ class PromptShiftApp : Application() {
             batchRepository = repository,
             configRepository = aiConfigRepository,
             streamingClient = HttpOpenAiStreamingClient(),
+        )
+
+        timerManager = CountdownTimerManager(
+            appScope = appScope,
+            onTimerFinished = {
+                TimerAlertNotifier.triggerTimerDoneAlert(this)
+                repository.postFeedback("Timer Done! ⏱", isError = false)
+            },
+            onAlertDismissed = {
+                TimerAlertNotifier.dismissAlert(this)
+            },
         )
     }
 

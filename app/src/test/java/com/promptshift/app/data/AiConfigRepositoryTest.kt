@@ -106,4 +106,113 @@ class AiConfigRepositoryTest {
             targetRepo.configState.value.instructions[1].body,
         )
     }
+
+    @Test
+    fun `persists favorite models, reasoning effort, trigger words, snippets, and deduplicated Recent 10`() {
+        val configFile = File(tempFolder.root, "phase4_config.json")
+        val keyStore = InMemoryApiKeyStore()
+        val repo = DefaultAiConfigRepository(FileAiConfigPersistence(configFile), keyStore)
+
+        val provider = repo.saveProvider(
+            id = null,
+            name = "OpenRouter",
+            baseUrl = "https://openrouter.ai/api/v1",
+            modelId = "deepseek/deepseek-chat",
+            apiKeyInput = "sk-key-1",
+            favoriteModels = listOf("openai/gpt-4o-mini", "anthropic/claude-3.5-sonnet"),
+        )
+        repo.selectProviderModel(provider.id, "openai/gpt-4o-mini")
+        assertEquals("openai/gpt-4o-mini", repo.configState.value.activeProvider?.modelId)
+        assertTrue("deepseek/deepseek-chat" in repo.configState.value.activeProvider!!.favoriteModels)
+
+        repo.setReasoningEffort(com.promptshift.app.domain.ReasoningEffort.HIGH)
+        assertTrue(repo.addTriggerWordChip("ohwx woman,"))
+        assertEquals("ohwx woman", repo.configState.value.effectiveTriggerWord)
+        repo.toggleTriggerWordChip("ohwx woman")
+        assertNull(repo.configState.value.effectiveTriggerWord)
+        repo.toggleTriggerWordChip("ohwx woman")
+        assertEquals("ohwx woman", repo.configState.value.effectiveTriggerWord)
+
+        val snip = repo.saveSnippet(null, "35mm Film", "35mm Kodak Portra, soft grain", includeTriggerWord = false)
+        assertFalse(snip.includeTriggerWord)
+
+        // Record 12 recent prompts with a duplicate -> capped at 10, newest first
+        for (i in 1..12) {
+            repo.recordRecentPrompt("Recent prompt #$i")
+        }
+        repo.recordRecentPrompt("Recent prompt #5")
+        assertEquals(10, repo.configState.value.recentPrompts.size)
+        assertEquals("Recent prompt #5", repo.configState.value.recentPrompts.first())
+
+        // Cold restart restores everything cleanly
+        val restarted = DefaultAiConfigRepository(FileAiConfigPersistence(configFile), keyStore)
+        assertEquals("openai/gpt-4o-mini", restarted.configState.value.activeProvider?.modelId)
+        assertEquals(com.promptshift.app.domain.ReasoningEffort.HIGH, restarted.configState.value.reasoningEffort)
+        assertEquals("ohwx woman", restarted.configState.value.effectiveTriggerWord)
+        assertEquals(1, restarted.configState.value.snippets.size)
+        assertEquals(10, restarted.configState.value.recentPrompts.size)
+        assertEquals("Recent prompt #5", restarted.configState.value.recentPrompts.first())
+    }
+
+    @Test
+    fun `safe backup v2 exports and restores profiles, snippets, triggers, and favorite models with ZERO API keys`() {
+        val sourceRepo = DefaultAiConfigRepository(
+            FileAiConfigPersistence(File(tempFolder.root, "backup_src.json")),
+            InMemoryApiKeyStore(),
+        )
+        val secretKey = "sk-ultra-secret-never-export-777"
+        sourceRepo.saveProvider(
+            id = null,
+            name = "OpenRouter",
+            baseUrl = "https://openrouter.ai/api/v1",
+            modelId = "deepseek/deepseek-chat",
+            apiKeyInput = secretKey,
+            favoriteModels = listOf("openai/gpt-4o-mini", "google/gemini-2.5-pro"),
+        )
+        sourceRepo.saveInstruction(null, "Cinematic", "Moody lighting")
+        sourceRepo.saveSnippet(null, "Quality", "8k ultra detailed", includeTriggerWord = false)
+        sourceRepo.addTriggerWordChip("ohwx woman")
+
+        val backupJson = sourceRepo.exportSafeBackupJson()
+        assertTrue(backupJson.contains(AiConfigCodec.EXPORT_FORMAT_TAG_V2))
+        assertFalse("Backup MUST NEVER contain API keys", backupJson.contains(secretKey))
+        assertFalse("Backup MUST NEVER contain provider baseUrl", backupJson.contains("openrouter.ai/api/v1"))
+
+        val targetRepo = DefaultAiConfigRepository(
+            FileAiConfigPersistence(File(tempFolder.root, "backup_dst.json")),
+            InMemoryApiKeyStore(),
+        )
+        // Target already has a matching provider by name (with its own local API key)
+        targetRepo.saveProvider(null, "OpenRouter", "https://openrouter.ai/api/v1", "deepseek/deepseek-chat", "sk-local")
+
+        val result = targetRepo.importSafeBackupJson(backupJson)
+        assertEquals(
+            com.promptshift.app.domain.SafeBackupImportResult.Imported(
+                instructionsCount = 1,
+                snippetsCount = 1,
+                triggerWordsCount = 1,
+                favoriteModelsCount = 2,
+            ),
+            result,
+        )
+        assertEquals(1, targetRepo.configState.value.instructions.size)
+        assertEquals(1, targetRepo.configState.value.snippets.size)
+        assertEquals(listOf("ohwx woman"), targetRepo.configState.value.triggerWords)
+        assertEquals(
+            listOf("openai/gpt-4o-mini", "google/gemini-2.5-pro"),
+            targetRepo.configState.value.activeProvider?.favoriteModels,
+        )
+
+        // Backward compatibility: v1 instructions-only JSON still imports via importSafeBackupJson
+        val v1Json = sourceRepo.exportInstructionsJson()
+        val v1Target = DefaultAiConfigRepository(
+            FileAiConfigPersistence(File(tempFolder.root, "backup_v1_dst.json")),
+            InMemoryApiKeyStore(),
+        )
+        val v1Res = v1Target.importSafeBackupJson(v1Json)
+        assertEquals(
+            com.promptshift.app.domain.SafeBackupImportResult.Imported(1, 0, 0, 0),
+            v1Res,
+        )
+    }
 }

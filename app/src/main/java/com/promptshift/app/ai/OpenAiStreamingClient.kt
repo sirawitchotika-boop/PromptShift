@@ -2,8 +2,10 @@ package com.promptshift.app.ai
 
 import com.promptshift.app.data.SimpleJsonParser
 import com.promptshift.app.domain.ConnectionTestResult
+import com.promptshift.app.domain.FetchModelsResult
 import com.promptshift.app.domain.InstructionProfile
 import com.promptshift.app.domain.ProviderProfile
+import com.promptshift.app.domain.ReasoningEffort
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
@@ -21,6 +23,8 @@ interface AiStreamingClient {
         instruction: InstructionProfile?,
         direction: String,
         promptCount: Int,
+        reasoningEffort: ReasoningEffort = ReasoningEffort.DEFAULT,
+        activeTriggerWord: String? = null,
         onPromptCompleted: (String) -> Unit,
     ): Int
 
@@ -28,6 +32,11 @@ interface AiStreamingClient {
         provider: ProviderProfile,
         apiKey: String,
     ): ConnectionTestResult
+
+    suspend fun fetchModels(
+        baseUrl: String,
+        apiKey: String,
+    ): FetchModelsResult = FetchModelsResult.Failure("Model listing not supported")
 }
 
 /**
@@ -42,6 +51,8 @@ class HttpOpenAiStreamingClient : AiStreamingClient {
         instruction: InstructionProfile?,
         direction: String,
         promptCount: Int,
+        reasoningEffort: ReasoningEffort,
+        activeTriggerWord: String?,
         onPromptCompleted: (String) -> Unit,
     ): Int = withContext(Dispatchers.IO) {
         val endpoint = OpenAiRequestBuilder.resolveChatCompletionsUrl(provider.baseUrl)
@@ -54,6 +65,8 @@ class HttpOpenAiStreamingClient : AiStreamingClient {
             instruction = instruction,
             direction = direction,
             promptCount = promptCount,
+            reasoningEffort = reasoningEffort,
+            activeTriggerWord = activeTriggerWord,
         )
 
         val connection = (URL(endpoint).openConnection() as HttpURLConnection).apply {
@@ -171,6 +184,49 @@ class HttpOpenAiStreamingClient : AiStreamingClient {
             }
         } catch (e: Exception) {
             ConnectionTestResult.Failure(e.message?.take(120) ?: "Connection failed")
+        } finally {
+            try {
+                connection.disconnect()
+            } catch (_: Exception) {
+            }
+        }
+    }
+
+    override suspend fun fetchModels(
+        baseUrl: String,
+        apiKey: String,
+    ): FetchModelsResult = withContext(Dispatchers.IO) {
+        val endpoint = OpenAiRequestBuilder.resolveModelsUrl(baseUrl)
+        if (!endpoint.startsWith("http://") && !endpoint.startsWith("https://")) {
+            return@withContext FetchModelsResult.Failure("Base URL must start with https://")
+        }
+
+        val connection = (URL(endpoint).openConnection() as HttpURLConnection).apply {
+            requestMethod = "GET"
+            connectTimeout = CONNECT_TIMEOUT_MS
+            readTimeout = TEST_READ_TIMEOUT_MS
+            doInput = true
+            useCaches = false
+            setRequestProperty("Authorization", "Bearer $apiKey")
+            setRequestProperty("Accept", "application/json")
+        }
+
+        try {
+            val code = connection.responseCode
+            if (code in 200..299) {
+                val body = connection.inputStream.bufferedReader(Charsets.UTF_8).use { it.readText() }
+                val models = OpenAiRequestBuilder.parseModelsResponse(body)
+                if (models.isEmpty()) {
+                    FetchModelsResult.Failure("No models returned by endpoint")
+                } else {
+                    FetchModelsResult.Success(models)
+                }
+            } else {
+                val errBody = readErrorStream(connection)
+                FetchModelsResult.Failure(formatHttpError(code, errBody))
+            }
+        } catch (e: Exception) {
+            FetchModelsResult.Failure(e.message?.take(120) ?: "Failed to fetch models")
         } finally {
             try {
                 connection.disconnect()

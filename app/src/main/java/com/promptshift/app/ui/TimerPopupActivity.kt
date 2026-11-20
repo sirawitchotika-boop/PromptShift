@@ -1,0 +1,313 @@
+package com.promptshift.app.ui
+
+import android.content.Context
+import android.content.Intent
+import android.os.Bundle
+import androidx.activity.ComponentActivity
+import androidx.activity.compose.setContent
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Surface
+import androidx.compose.material3.Text
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.promptshift.app.PromptShiftApp
+import com.promptshift.app.timer.TimerState
+import com.promptshift.app.ui.theme.PromptShiftColors
+import com.promptshift.app.ui.theme.PromptShiftTheme
+
+/**
+ * Simple translucent Countdown Timer popup launched from the Floating Bubble or Mini-Keyboard [⏱] chip.
+ */
+class TimerPopupActivity : ComponentActivity() {
+
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+
+        val app = PromptShiftApp.from(this)
+        val timerManager = app.timerManager
+
+        setContent {
+            PromptShiftTheme {
+                val timerState by timerManager.state.collectAsStateWithLifecycle()
+
+                TimerPopupContent(
+                    timerState = timerState,
+                    onStart = { min, sec ->
+                        if (timerManager.start(min, sec)) {
+                            finish()
+                        }
+                    },
+                    onCancel = { timerManager.cancel() },
+                    onReset = { timerManager.reset() },
+                    onDismissAlert = { timerManager.dismissFinishedAlert() },
+                    onDismiss = { finish() },
+                )
+            }
+        }
+    }
+
+    companion object {
+        fun launch(context: Context) {
+            val intent = Intent(context, TimerPopupActivity::class.java).apply {
+                addFlags(
+                    Intent.FLAG_ACTIVITY_NEW_TASK or
+                        Intent.FLAG_ACTIVITY_EXCLUDE_FROM_RECENTS,
+                )
+            }
+            context.startActivity(intent)
+        }
+    }
+}
+
+@Composable
+private fun TimerPopupContent(
+    timerState: TimerState,
+    onStart: (Int, Int) -> Unit,
+    onCancel: () -> Unit,
+    onReset: () -> Unit,
+    onDismissAlert: () -> Unit,
+    onDismiss: () -> Unit,
+) {
+    var minutesInput by remember { mutableStateOf("") }
+    var secondsInput by remember { mutableStateOf("") }
+    var validationError by remember { mutableStateOf<String?>(null) }
+
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Color.Black.copy(alpha = 0.45f))
+            .clickable(
+                interactionSource = remember { MutableInteractionSource() },
+                indication = null,
+                onClick = onDismiss,
+            )
+            .imePadding()
+            .padding(horizontal = 20.dp, vertical = 20.dp),
+        contentAlignment = Alignment.Center,
+    ) {
+        Surface(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clickable(
+                    interactionSource = remember { MutableInteractionSource() },
+                    indication = null,
+                    onClick = {},
+                ),
+            shape = RoundedCornerShape(20.dp),
+            color = PromptShiftColors.CarbonSurface.copy(alpha = 0.96f),
+            border = BorderStroke(1.dp, PromptShiftColors.MetalBorder),
+            shadowElevation = 14.dp,
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(16.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        text = "COUNTDOWN TIMER",
+                        color = PromptShiftColors.TextPrimary,
+                        fontSize = 14.sp,
+                        fontWeight = FontWeight.ExtraBold,
+                        letterSpacing = 1.1.sp,
+                    )
+                    Text(
+                        text = "✕",
+                        color = PromptShiftColors.TextMuted,
+                        fontSize = 16.sp,
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(8.dp))
+                            .clickable(onClick = onDismiss)
+                            .padding(horizontal = 8.dp, vertical = 4.dp),
+                    )
+                }
+
+                if (timerState.isRunning) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(14.dp))
+                            .background(PromptShiftColors.ObsidianBg)
+                            .border(1.dp, PromptShiftColors.CopiedEmerald.copy(alpha = 0.65f), RoundedCornerShape(14.dp))
+                            .padding(vertical = 18.dp),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Text(
+                            text = timerState.formattedRemaining(),
+                            color = PromptShiftColors.CopiedEmerald,
+                            fontFamily = FontFamily.Monospace,
+                            fontSize = 36.sp,
+                            fontWeight = FontWeight.ExtraBold,
+                        )
+                    }
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(10.dp),
+                    ) {
+                        OutlinedButton(
+                            onClick = onCancel,
+                            modifier = Modifier
+                                .weight(1f)
+                                .height(44.dp),
+                            shape = RoundedCornerShape(12.dp),
+                            border = BorderStroke(1.dp, PromptShiftColors.QuotaWarnRed.copy(alpha = 0.7f)),
+                            colors = ButtonDefaults.outlinedButtonColors(contentColor = PromptShiftColors.QuotaWarnRed),
+                        ) {
+                            Text("Cancel", fontWeight = FontWeight.Bold)
+                        }
+                        Button(
+                            onClick = onReset,
+                            modifier = Modifier
+                                .weight(1f)
+                                .height(44.dp),
+                            shape = RoundedCornerShape(12.dp),
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = PromptShiftColors.CarbonElevated,
+                                contentColor = PromptShiftColors.TextPrimary,
+                            ),
+                            border = BorderStroke(1.dp, PromptShiftColors.MetalBorder),
+                        ) {
+                            Text("Reset", fontWeight = FontWeight.Bold)
+                        }
+                    }
+                } else {
+                    if (timerState.isFinished) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(12.dp))
+                                .background(PromptShiftColors.CopiedEmeraldBg)
+                                .border(1.dp, PromptShiftColors.CopiedEmerald, RoundedCornerShape(12.dp))
+                                .padding(horizontal = 12.dp, vertical = 10.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Text(
+                                text = "Timer Done! ⏱",
+                                color = PromptShiftColors.CopiedEmerald,
+                                fontSize = 13.5.sp,
+                                fontWeight = FontWeight.Bold,
+                            )
+                            Text(
+                                text = "Dismiss",
+                                color = PromptShiftColors.TextPrimary,
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Bold,
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(8.dp))
+                                    .background(PromptShiftColors.CarbonElevated)
+                                    .clickable(onClick = onDismissAlert)
+                                    .padding(horizontal = 10.dp, vertical = 5.dp),
+                            )
+                        }
+                    }
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(10.dp),
+                    ) {
+                        OutlinedTextField(
+                            value = minutesInput,
+                            onValueChange = { raw ->
+                                minutesInput = raw.filter { it.isDigit() }.take(3)
+                                validationError = null
+                            },
+                            label = { Text("Min", fontSize = 12.sp) },
+                            placeholder = { Text("0", fontSize = 13.sp) },
+                            singleLine = true,
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                            modifier = Modifier.weight(1f),
+                            colors = darkInputColors(),
+                            shape = RoundedCornerShape(12.dp),
+                        )
+                        OutlinedTextField(
+                            value = secondsInput,
+                            onValueChange = { raw ->
+                                secondsInput = raw.filter { it.isDigit() }.take(2)
+                                validationError = null
+                            },
+                            label = { Text("Sec", fontSize = 12.sp) },
+                            placeholder = { Text("00", fontSize = 13.sp) },
+                            singleLine = true,
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                            modifier = Modifier.weight(1f),
+                            colors = darkInputColors(),
+                            shape = RoundedCornerShape(12.dp),
+                        )
+                    }
+
+                    if (!validationError.isNullOrBlank()) {
+                        Text(
+                            text = validationError.orEmpty(),
+                            color = PromptShiftColors.QuotaWarnRed,
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.SemiBold,
+                        )
+                    }
+
+                    Button(
+                        onClick = {
+                            val min = minutesInput.toIntOrNull() ?: 0
+                            val sec = secondsInput.toIntOrNull() ?: 0
+                            if (min == 0 && sec == 0) {
+                                validationError = "Enter minutes or seconds"
+                            } else {
+                                onStart(min, sec)
+                            }
+                        },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(46.dp),
+                        shape = RoundedCornerShape(12.dp),
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = PromptShiftColors.GtCrimson,
+                            contentColor = PromptShiftColors.TextPrimary,
+                        ),
+                        border = BorderStroke(1.dp, PromptShiftColors.GtCrimsonGlow),
+                    ) {
+                        Text("Start Timer", fontSize = 14.5.sp, fontWeight = FontWeight.Bold)
+                    }
+                }
+            }
+        }
+    }
+}

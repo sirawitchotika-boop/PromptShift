@@ -3,7 +3,11 @@ package com.promptshift.app.data
 import com.promptshift.app.domain.AiConfigState
 import com.promptshift.app.domain.InstructionImportResult
 import com.promptshift.app.domain.InstructionProfile
+import com.promptshift.app.domain.PromptSnippet
+import com.promptshift.app.domain.PromptTextComposer
 import com.promptshift.app.domain.ProviderProfile
+import com.promptshift.app.domain.ReasoningEffort
+import com.promptshift.app.domain.SafeBackupImportResult
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -49,10 +53,14 @@ interface AiConfigRepository {
         baseUrl: String,
         modelId: String,
         apiKeyInput: String?,
+        favoriteModels: List<String>? = null,
     ): ProviderProfile
 
     fun deleteProvider(id: String)
     fun selectProvider(id: String)
+    fun selectProviderModel(providerId: String, modelId: String)
+    fun addFavoriteModel(providerId: String, modelId: String)
+    fun removeFavoriteModel(providerId: String, modelId: String)
     fun getApiKey(providerId: String): String?
 
     fun saveInstruction(id: String?, name: String, body: String): InstructionProfile
@@ -60,9 +68,30 @@ interface AiConfigRepository {
     fun selectInstruction(id: String?)
 
     fun setDefaultPromptCount(count: Int)
+    fun setReasoningEffort(effort: ReasoningEffort)
+
+    fun setActiveTriggerWord(rawWord: String?, enabled: Boolean? = null)
+    fun setTriggerWordEnabled(enabled: Boolean)
+    fun toggleTriggerWordChip(chip: String)
+    fun addTriggerWordChip(rawWord: String): Boolean
+    fun removeTriggerWordChip(chip: String)
+
+    fun saveSnippet(
+        id: String?,
+        title: String,
+        body: String,
+        includeTriggerWord: Boolean,
+    ): PromptSnippet
+
+    fun deleteSnippet(id: String)
+    fun recordRecentPrompt(prompt: String)
+    fun clearRecentPrompts()
 
     fun exportInstructionsJson(): String
     fun importInstructionsJson(json: String): InstructionImportResult
+
+    fun exportSafeBackupJson(): String
+    fun importSafeBackupJson(json: String): SafeBackupImportResult
 }
 
 class DefaultAiConfigRepository(
@@ -91,6 +120,12 @@ class DefaultAiConfigRepository(
                 instructions = saved.instructions,
                 activeInstructionId = validInstructionId,
                 defaultPromptCount = saved.defaultPromptCount.coerceIn(1, 100),
+                reasoningEffort = saved.reasoningEffort,
+                triggerWords = saved.triggerWords,
+                activeTriggerWord = saved.activeTriggerWord,
+                triggerWordEnabled = saved.triggerWordEnabled && !saved.activeTriggerWord.isNullOrBlank(),
+                snippets = saved.snippets,
+                recentPrompts = saved.recentPrompts.take(MAX_RECENT_PROMPTS),
             )
         } else {
             AiConfigState()
@@ -106,21 +141,30 @@ class DefaultAiConfigRepository(
         baseUrl: String,
         modelId: String,
         apiKeyInput: String?,
+        favoriteModels: List<String>?,
     ): ProviderProfile {
         synchronized(lock) {
             val resolvedId = id?.takeIf { it.isNotBlank() } ?: "prov_${UUID.randomUUID().toString().take(8)}"
             if (!apiKeyInput.isNullOrBlank()) {
                 apiKeyStore.saveKey(resolvedId, apiKeyInput.trim())
             }
+            val current = _configState.value
+            val existing = current.providers.firstOrNull { it.id == resolvedId }
+            val cleanModelId = modelId.trim()
+            val resolvedFavs = (favoriteModels ?: existing?.favoriteModels ?: emptyList())
+                .map { it.trim() }
+                .filter { it.isNotEmpty() }
+                .distinct()
+
             val profile = ProviderProfile(
                 id = resolvedId,
                 name = name.trim(),
                 baseUrl = baseUrl.trim(),
-                modelId = modelId.trim(),
+                modelId = cleanModelId,
+                favoriteModels = resolvedFavs,
                 hasApiKey = apiKeyStore.hasKey(resolvedId),
             )
-            val current = _configState.value
-            val updatedList = if (current.providers.any { it.id == resolvedId }) {
+            val updatedList = if (existing != null) {
                 current.providers.map { if (it.id == resolvedId) profile else it }
             } else {
                 current.providers + profile
@@ -158,6 +202,55 @@ class DefaultAiConfigRepository(
             val current = _configState.value
             if (current.providers.none { it.id == id }) return
             _configState.value = current.copy(activeProviderId = id)
+            persistLocked()
+        }
+    }
+
+    override fun selectProviderModel(providerId: String, modelId: String) {
+        val cleanModel = modelId.trim()
+        if (cleanModel.isEmpty()) return
+        synchronized(lock) {
+            val current = _configState.value
+            val target = current.providers.firstOrNull { it.id == providerId } ?: return
+            if (target.modelId == cleanModel) return
+            val updatedFavs = (target.favoriteModels + target.modelId + cleanModel)
+                .map { it.trim() }
+                .filter { it.isNotEmpty() }
+                .distinct()
+            val updatedProviders = current.providers.map { p ->
+                if (p.id == providerId) p.copy(modelId = cleanModel, favoriteModels = updatedFavs) else p
+            }
+            _configState.value = current.copy(providers = updatedProviders)
+            persistLocked()
+        }
+    }
+
+    override fun addFavoriteModel(providerId: String, modelId: String) {
+        val cleanModel = modelId.trim()
+        if (cleanModel.isEmpty()) return
+        synchronized(lock) {
+            val current = _configState.value
+            val target = current.providers.firstOrNull { it.id == providerId } ?: return
+            val updatedFavs = (target.favoriteModels + cleanModel).distinct()
+            if (updatedFavs == target.favoriteModels) return
+            val updatedProviders = current.providers.map { p ->
+                if (p.id == providerId) p.copy(favoriteModels = updatedFavs) else p
+            }
+            _configState.value = current.copy(providers = updatedProviders)
+            persistLocked()
+        }
+    }
+
+    override fun removeFavoriteModel(providerId: String, modelId: String) {
+        synchronized(lock) {
+            val current = _configState.value
+            val target = current.providers.firstOrNull { it.id == providerId } ?: return
+            val updatedFavs = target.favoriteModels.filterNot { it == modelId }
+            if (updatedFavs == target.favoriteModels) return
+            val updatedProviders = current.providers.map { p ->
+                if (p.id == providerId) p.copy(favoriteModels = updatedFavs) else p
+            }
+            _configState.value = current.copy(providers = updatedProviders)
             persistLocked()
         }
     }
@@ -223,6 +316,142 @@ class DefaultAiConfigRepository(
         }
     }
 
+    override fun setReasoningEffort(effort: ReasoningEffort) {
+        synchronized(lock) {
+            if (_configState.value.reasoningEffort == effort) return
+            _configState.value = _configState.value.copy(reasoningEffort = effort)
+            persistLocked()
+        }
+    }
+
+    override fun setActiveTriggerWord(rawWord: String?, enabled: Boolean?) {
+        synchronized(lock) {
+            val normalized = PromptTextComposer.normalizeTriggerWord(rawWord)
+            val current = _configState.value
+            val nextEnabled = when {
+                normalized == null -> false
+                enabled != null -> enabled
+                else -> current.triggerWordEnabled
+            }
+            _configState.value = current.copy(
+                activeTriggerWord = normalized,
+                triggerWordEnabled = nextEnabled,
+            )
+            persistLocked()
+        }
+    }
+
+    override fun setTriggerWordEnabled(enabled: Boolean) {
+        synchronized(lock) {
+            val current = _configState.value
+            val effectiveEnabled = enabled && !current.activeTriggerWord.isNullOrBlank()
+            if (current.triggerWordEnabled == effectiveEnabled) return
+            _configState.value = current.copy(triggerWordEnabled = effectiveEnabled)
+            persistLocked()
+        }
+    }
+
+    override fun toggleTriggerWordChip(chip: String) {
+        val normalized = PromptTextComposer.normalizeTriggerWord(chip) ?: return
+        synchronized(lock) {
+            val current = _configState.value
+            val isSameActive = current.triggerWordEnabled && current.activeTriggerWord == normalized
+            _configState.value = if (isSameActive) {
+                current.copy(triggerWordEnabled = false)
+            } else {
+                current.copy(activeTriggerWord = normalized, triggerWordEnabled = true)
+            }
+            persistLocked()
+        }
+    }
+
+    override fun addTriggerWordChip(rawWord: String): Boolean {
+        val normalized = PromptTextComposer.normalizeTriggerWord(rawWord) ?: return false
+        synchronized(lock) {
+            val current = _configState.value
+            val updatedChips = (current.triggerWords + normalized).distinct()
+            _configState.value = current.copy(
+                triggerWords = updatedChips,
+                activeTriggerWord = normalized,
+                triggerWordEnabled = true,
+            )
+            persistLocked()
+            return true
+        }
+    }
+
+    override fun removeTriggerWordChip(chip: String) {
+        synchronized(lock) {
+            val current = _configState.value
+            val remaining = current.triggerWords.filterNot { it == chip }
+            val clearedActive = current.activeTriggerWord == chip
+            _configState.value = current.copy(
+                triggerWords = remaining,
+                activeTriggerWord = if (clearedActive) null else current.activeTriggerWord,
+                triggerWordEnabled = if (clearedActive) false else current.triggerWordEnabled,
+            )
+            persistLocked()
+        }
+    }
+
+    override fun saveSnippet(
+        id: String?,
+        title: String,
+        body: String,
+        includeTriggerWord: Boolean,
+    ): PromptSnippet {
+        synchronized(lock) {
+            val resolvedId = id?.takeIf { it.isNotBlank() } ?: "snip_${UUID.randomUUID().toString().take(8)}"
+            val snippet = PromptSnippet(
+                id = resolvedId,
+                title = title.trim(),
+                body = body.trim(),
+                includeTriggerWord = includeTriggerWord,
+            )
+            val current = _configState.value
+            val updated = if (current.snippets.any { it.id == resolvedId }) {
+                current.snippets.map { if (it.id == resolvedId) snippet else it }
+            } else {
+                current.snippets + snippet
+            }
+            _configState.value = current.copy(snippets = updated)
+            persistLocked()
+            return snippet
+        }
+    }
+
+    override fun deleteSnippet(id: String) {
+        synchronized(lock) {
+            val current = _configState.value
+            val remaining = current.snippets.filterNot { it.id == id }
+            if (remaining.size == current.snippets.size) return
+            _configState.value = current.copy(snippets = remaining)
+            persistLocked()
+        }
+    }
+
+    override fun recordRecentPrompt(prompt: String) {
+        val cleaned = prompt.trim()
+        if (cleaned.isEmpty()) return
+        synchronized(lock) {
+            val current = _configState.value
+            val updated = (listOf(cleaned) + current.recentPrompts.filterNot { it == cleaned })
+                .take(MAX_RECENT_PROMPTS)
+            if (updated == current.recentPrompts) return
+            _configState.value = current.copy(recentPrompts = updated)
+            persistLocked()
+        }
+    }
+
+    override fun clearRecentPrompts() {
+        synchronized(lock) {
+            val current = _configState.value
+            if (current.recentPrompts.isEmpty()) return
+            _configState.value = current.copy(recentPrompts = emptyList())
+            persistLocked()
+        }
+    }
+
     override fun exportInstructionsJson(): String =
         AiConfigCodec.encodeInstructionExport(_configState.value.instructions)
 
@@ -247,6 +476,89 @@ class DefaultAiConfigRepository(
         return InstructionImportResult.Imported(decoded.size)
     }
 
+    override fun exportSafeBackupJson(): String {
+        val state = _configState.value
+        val favEntries = state.providers.mapNotNull { provider ->
+            val models = provider.favoriteModels.map { it.trim() }.filter { it.isNotEmpty() }.distinct()
+            if (models.isEmpty()) {
+                null
+            } else {
+                SafeBackupFavoriteModels(
+                    providerId = provider.id,
+                    providerName = provider.name,
+                    models = models,
+                )
+            }
+        }
+        return AiConfigCodec.encodeSafeBackup(
+            SafeBackupPayload(
+                instructions = state.instructions,
+                snippets = state.snippets,
+                triggerWords = state.triggerWords,
+                favoriteModels = favEntries,
+            ),
+        )
+    }
+
+    override fun importSafeBackupJson(json: String): SafeBackupImportResult {
+        val payload = AiConfigCodec.decodeSafeBackup(json)
+            ?: return SafeBackupImportResult.Failed("Invalid PromptShift backup JSON")
+
+        val hasAny = payload.instructions.isNotEmpty() ||
+            payload.snippets.isNotEmpty() ||
+            payload.triggerWords.isNotEmpty() ||
+            payload.favoriteModels.isNotEmpty()
+        if (!hasAny) {
+            return SafeBackupImportResult.Failed("No profiles, snippets, triggers, or favorite models found")
+        }
+
+        var mergedFavCount = 0
+        synchronized(lock) {
+            val current = _configState.value
+
+            val mergedInstructions = LinkedHashMap<String, InstructionProfile>()
+            current.instructions.forEach { mergedInstructions[it.id] = it }
+            payload.instructions.forEach { mergedInstructions[it.id] = it }
+
+            val mergedSnippets = LinkedHashMap<String, PromptSnippet>()
+            current.snippets.forEach { mergedSnippets[it.id] = it }
+            payload.snippets.forEach { mergedSnippets[it.id] = it }
+
+            val mergedTriggers = (current.triggerWords + payload.triggerWords).distinct()
+
+            val updatedProviders = current.providers.map { provider ->
+                val matched = payload.favoriteModels.filter { entry ->
+                    (entry.providerId != null && entry.providerId == provider.id) ||
+                        (entry.providerName.isNotEmpty() && entry.providerName.equals(provider.name, ignoreCase = true))
+                }
+                if (matched.isEmpty()) {
+                    provider
+                } else {
+                    val incomingModels = matched.flatMap { it.models }
+                    mergedFavCount += incomingModels.distinct().size
+                    provider.copy(
+                        favoriteModels = (provider.favoriteModels + incomingModels).distinct(),
+                    )
+                }
+            }
+
+            _configState.value = current.copy(
+                providers = updatedProviders,
+                instructions = mergedInstructions.values.toList(),
+                snippets = mergedSnippets.values.toList(),
+                triggerWords = mergedTriggers,
+            )
+            persistLocked()
+        }
+
+        return SafeBackupImportResult.Imported(
+            instructionsCount = payload.instructions.size,
+            snippetsCount = payload.snippets.size,
+            triggerWordsCount = payload.triggerWords.size,
+            favoriteModelsCount = mergedFavCount,
+        )
+    }
+
     private fun persistLocked() {
         val state = _configState.value
         persistence.save(
@@ -256,7 +568,17 @@ class DefaultAiConfigRepository(
                 instructions = state.instructions,
                 activeInstructionId = state.activeInstructionId,
                 defaultPromptCount = state.defaultPromptCount,
+                reasoningEffort = state.reasoningEffort,
+                triggerWords = state.triggerWords,
+                activeTriggerWord = state.activeTriggerWord,
+                triggerWordEnabled = state.triggerWordEnabled,
+                snippets = state.snippets,
+                recentPrompts = state.recentPrompts,
             ),
         )
+    }
+
+    companion object {
+        const val MAX_RECENT_PROMPTS = 10
     }
 }
