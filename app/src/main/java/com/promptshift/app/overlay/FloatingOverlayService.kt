@@ -22,8 +22,11 @@ import com.promptshift.app.clipboard.ClipboardHelper
 import com.promptshift.app.clipboard.ClipboardTrampolineActivity
 import com.promptshift.app.domain.GenerationState
 import com.promptshift.app.domain.PromptBatchState
+import com.promptshift.app.domain.PromptTextComposer
 import com.promptshift.app.ui.MainActivity
 import com.promptshift.app.ui.QuickDirectionActivity
+import com.promptshift.app.ui.SnippetsPopupActivity
+import com.promptshift.app.ui.TimerPopupActivity
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -46,7 +49,9 @@ class FloatingOverlayService : Service() {
 
         val app = PromptShiftApp.from(this)
         val repository = app.repository
+        val configRepo = app.aiConfigRepository
         val coordinator = app.generationCoordinator
+        val timerManager = app.timerManager
 
         startForegroundCompliant(
             buildNotification(repository.batchState.value, coordinator.generationState.value),
@@ -64,14 +69,21 @@ class FloatingOverlayService : Service() {
             onAiClicked = { QuickDirectionActivity.launch(this) },
             onCancelStreamClicked = { coordinator.cancelGeneration() },
             onLoadClicked = { ClipboardTrampolineActivity.launch(this) },
+            onSnippetsClicked = { SnippetsPopupActivity.launch(this) },
+            onTimerClicked = { TimerPopupActivity.launch(this) },
             onClearConfirmed = { repository.clearBatch() },
             onCloseClicked = { stopSelf() },
             onPreviousClicked = { repository.stepPrevious() },
             onNextClicked = { repository.stepNext() },
             onCopyClicked = {
-                val prompt = repository.markCurrentCopied()
-                if (prompt != null) {
-                    ClipboardHelper.writePlainText(this, "PromptShift", prompt)
+                val rawPrompt = repository.markCurrentCopied()
+                if (rawPrompt != null) {
+                    val finalPrompt = PromptTextComposer.applyTriggerWord(
+                        rawPrompt,
+                        configRepo.configState.value.effectiveTriggerWord,
+                    )
+                    ClipboardHelper.writePlainText(this, "PromptShift", finalPrompt)
+                    configRepo.recordRecentPrompt(finalPrompt)
                 }
             },
             onCollapsedChanged = { collapsed -> repository.setCollapsed(collapsed) },
@@ -96,9 +108,21 @@ class FloatingOverlayService : Service() {
         }
 
         serviceScope.launch {
+            configRepo.configState.collect { config ->
+                controller.renderActiveTriggerWord(config.effectiveTriggerWord)
+            }
+        }
+
+        serviceScope.launch {
             coordinator.generationState.collect { genState ->
                 controller.renderGenerationState(genState)
                 updateNotification(repository.batchState.value, genState)
+            }
+        }
+
+        serviceScope.launch {
+            timerManager.state.collect { timerState ->
+                controller.renderTimerState(timerState)
             }
         }
 

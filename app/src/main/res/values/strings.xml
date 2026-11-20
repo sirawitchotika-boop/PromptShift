@@ -7,4 +7,9 @@
     <string name="notification_action_stop">Stop</string>
     <string name="ime_label">PromptShift Keyboard</string>
     <string name="ime_subtype_label">PromptShift Auto-Insert</string>
+    <string name="timer_channel_name">Countdown Timer</string>
+    <string name="timer_channel_desc">Heads-up alert when your PromptShift countdown timer finishes.</string>
+    <string name="timer_done_title">PromptShift Timer Done</string>
+    <string name="timer_done_body">Your countdown timer has finished.</string>
+    <string name="timer_action_dismiss">Dismiss</string>
 </resources>

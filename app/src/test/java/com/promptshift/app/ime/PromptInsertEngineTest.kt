@@ -10,6 +10,7 @@ class PromptInsertEngineTest {
         var selectAllSupported: Boolean = true,
         var commitTextSupported: Boolean = true,
         var pasteSupported: Boolean = true,
+        var beforeCursorText: String? = null,
         var beforeCursorLen: Int = 0,
         var afterCursorLen: Int = 0,
     ) : ImeConnectionAdapter {
@@ -46,6 +47,7 @@ class PromptInsertEngineTest {
             return commitTextSupported
         }
 
+        override fun getTextBeforeCursor(maxChars: Int): String? = beforeCursorText
         override fun getTextBeforeCursorLength(maxChars: Int): Int = beforeCursorLen
         override fun getTextAfterCursorLength(maxChars: Int): Int = afterCursorLen
 
@@ -103,6 +105,31 @@ class PromptInsertEngineTest {
         assertEquals(InsertOutcome.InsertedDirect, outcome)
         assertEquals(", volumetric light", adapter.committedText)
         assertEquals(listOf("begin", "commit:18:true", "end"), adapter.ops)
+    }
+
+    @Test
+    fun `insertSnippet uses smart comma joining when appending and full replace when Snip Rep is ON`() {
+        val emptyBox = FakeImeAdapter(beforeCursorText = "")
+        assertEquals(
+            InsertOutcome.InsertedDirect,
+            PromptInsertEngine.insertSnippet("35mm film grain", replaceExisting = false, adapter = emptyBox),
+        )
+        assertEquals("35mm film grain", emptyBox.committedText)
+
+        val nonEmptyBox = FakeImeAdapter(beforeCursorText = "cinematic portrait")
+        assertEquals(
+            InsertOutcome.InsertedDirect,
+            PromptInsertEngine.insertSnippet("35mm film grain", replaceExisting = false, adapter = nonEmptyBox),
+        )
+        assertEquals(", 35mm film grain", nonEmptyBox.committedText)
+
+        val replaceBox = FakeImeAdapter(beforeCursorText = "old text")
+        assertEquals(
+            InsertOutcome.InsertedDirect,
+            PromptInsertEngine.insertSnippet("fresh full template", replaceExisting = true, adapter = replaceBox),
+        )
+        assertEquals("fresh full template", replaceBox.committedText)
+        assertTrue("selectAll:true" in replaceBox.ops)
     }
 
     @Test

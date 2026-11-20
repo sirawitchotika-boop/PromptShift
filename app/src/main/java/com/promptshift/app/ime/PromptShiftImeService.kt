@@ -9,7 +9,10 @@ import android.view.inputmethod.InputMethodManager
 import com.promptshift.app.PromptShiftApp
 import com.promptshift.app.clipboard.ClipboardHelper
 import com.promptshift.app.clipboard.ClipboardTrampolineActivity
+import com.promptshift.app.domain.PromptSnippet
+import com.promptshift.app.domain.PromptTextComposer
 import com.promptshift.app.ui.QuickDirectionActivity
+import com.promptshift.app.ui.TimerPopupActivity
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -19,7 +22,7 @@ import kotlinx.coroutines.launch
 
 /**
  * 100% Thai banking-app-safe InputMethodService (standard Android keyboard API, ZERO Accessibility).
- * Shares live SSE batch state, checkmarks, and 2,000-char quota warning with the Floating Bubble.
+ * Shares live SSE batch state, Trigger Words, Snippets, Recent 10, Timer, and 2,000-char quota warning.
  */
 class PromptShiftImeService : InputMethodService() {
 
@@ -34,7 +37,9 @@ class PromptShiftImeService : InputMethodService() {
 
         val app = PromptShiftApp.from(this)
         val repository = app.repository
+        val configRepo = app.aiConfigRepository
         val coordinator = app.generationCoordinator
+        val timerManager = app.timerManager
 
         viewCollectorJob?.cancel()
         viewController?.destroy()
@@ -44,6 +49,7 @@ class PromptShiftImeService : InputMethodService() {
             onAiClicked = { QuickDirectionActivity.launch(this) },
             onCancelStreamClicked = { coordinator.cancelGeneration() },
             onLoadClicked = { handleLoadFromClipboard() },
+            onTimerClicked = { TimerPopupActivity.launch(this) },
             onToggleReplaceMode = {
                 val next = !repository.imePrefs.value.replaceMode
                 repository.setImeReplaceMode(next)
@@ -54,6 +60,14 @@ class PromptShiftImeService : InputMethodService() {
                 repository.setImeAutoNext(next)
                 repository.postFeedback(if (next) "Auto-Next ON" else "Auto-Next OFF")
             },
+            onToggleSnippetReplaceMode = {
+                val next = !repository.imePrefs.value.snippetReplaceMode
+                repository.setImeSnippetReplaceMode(next)
+                repository.postFeedback(if (next) "Snip: Replace" else "Snip: Join")
+            },
+            onSnippetClicked = { snippet -> handleInsertSnippet(snippet) },
+            onRecentClicked = { recent -> handleInsertRecent(recent) },
+            onSaveCurrentSlotClicked = { handleSaveCurrentSlotAsSnippet() },
             onHideKeyboardClicked = { requestHideSelf(0) },
             onPreviousClicked = { repository.stepPrevious() },
             onInsertClicked = { handleInsertCurrentPrompt() },
@@ -76,8 +90,18 @@ class PromptShiftImeService : InputMethodService() {
                 }
             }
             launch {
+                configRepo.configState.collect { config ->
+                    controller.renderAiConfig(config)
+                }
+            }
+            launch {
                 coordinator.generationState.collect { genState ->
                     controller.renderGenerationState(genState)
+                }
+            }
+            launch {
+                timerManager.state.collect { timerState ->
+                    controller.renderTimerState(timerState)
                 }
             }
             launch {
@@ -98,26 +122,107 @@ class PromptShiftImeService : InputMethodService() {
     }
 
     private fun handleInsertCurrentPrompt() {
-        val repository = PromptShiftApp.from(this).repository
-        val currentPrompt = repository.batchState.value.currentPrompt ?: return
+        val app = PromptShiftApp.from(this)
+        val repository = app.repository
+        val configRepo = app.aiConfigRepository
+        val rawPrompt = repository.batchState.value.currentPrompt ?: return
+        val finalPrompt = PromptTextComposer.applyTriggerWord(
+            rawPrompt,
+            configRepo.configState.value.effectiveTriggerWord,
+        )
         val prefs = repository.imePrefs.value
         val ic = currentInputConnection
         val adapter = ic?.let { AndroidImeConnectionAdapter(this, it) }
 
-        when (PromptInsertEngine.insert(currentPrompt, prefs.replaceMode, adapter)) {
+        when (PromptInsertEngine.insert(finalPrompt, prefs.replaceMode, adapter)) {
             InsertOutcome.InsertedDirect,
             InsertOutcome.InsertedViaPasteFallback,
             -> {
                 repository.markCurrentInserted(autoAdvance = prefs.autoNext)
+                configRepo.recordRecentPrompt(finalPrompt)
             }
             InsertOutcome.CopiedFallbackOnly -> {
                 repository.markCurrentCopied()
+                configRepo.recordRecentPrompt(finalPrompt)
                 repository.postFeedback("Copied — tap Paste", isError = false)
             }
             InsertOutcome.NoInputConnection -> {
                 repository.postFeedback("Tap text box first", isError = true)
             }
         }
+    }
+
+    private fun handleInsertSnippet(snippet: PromptSnippet) {
+        val app = PromptShiftApp.from(this)
+        val repository = app.repository
+        val configRepo = app.aiConfigRepository
+        val resolved = if (snippet.includeTriggerWord) {
+            PromptTextComposer.applyTriggerWord(
+                snippet.body,
+                configRepo.configState.value.effectiveTriggerWord,
+            )
+        } else {
+            snippet.body.trim()
+        }
+        val replaceMode = repository.imePrefs.value.snippetReplaceMode
+        val ic = currentInputConnection
+        val adapter = ic?.let { AndroidImeConnectionAdapter(this, it) }
+
+        when (PromptInsertEngine.insertSnippet(resolved, replaceMode, adapter)) {
+            InsertOutcome.InsertedDirect,
+            InsertOutcome.InsertedViaPasteFallback,
+            -> {
+                configRepo.recordRecentPrompt(resolved)
+                repository.postFeedback("Inserted: ${snippet.title.take(12)}")
+            }
+            InsertOutcome.CopiedFallbackOnly -> {
+                configRepo.recordRecentPrompt(resolved)
+                repository.postFeedback("Copied — tap Paste", isError = false)
+            }
+            InsertOutcome.NoInputConnection -> {
+                repository.postFeedback("Tap text box first", isError = true)
+            }
+        }
+    }
+
+    private fun handleInsertRecent(recentText: String) {
+        val app = PromptShiftApp.from(this)
+        val repository = app.repository
+        val replaceMode = repository.imePrefs.value.snippetReplaceMode
+        val ic = currentInputConnection
+        val adapter = ic?.let { AndroidImeConnectionAdapter(this, it) }
+
+        when (PromptInsertEngine.insertSnippet(recentText, replaceMode, adapter)) {
+            InsertOutcome.InsertedDirect,
+            InsertOutcome.InsertedViaPasteFallback,
+            -> {
+                app.aiConfigRepository.recordRecentPrompt(recentText)
+                repository.postFeedback("Inserted recent ✅")
+            }
+            InsertOutcome.CopiedFallbackOnly -> {
+                repository.postFeedback("Copied — tap Paste", isError = false)
+            }
+            InsertOutcome.NoInputConnection -> {
+                repository.postFeedback("Tap text box first", isError = true)
+            }
+        }
+    }
+
+    private fun handleSaveCurrentSlotAsSnippet() {
+        val app = PromptShiftApp.from(this)
+        val batch = app.repository.batchState.value
+        val currentPrompt = batch.currentPrompt ?: return
+        val autoTitle = currentPrompt.trim()
+            .replace('\n', ' ')
+            .take(24)
+            .ifBlank { "Slot #${batch.displayIndex}" }
+        app.aiConfigRepository.saveSnippet(
+            id = null,
+            title = autoTitle,
+            body = currentPrompt,
+            includeTriggerWord = true,
+        )
+        app.repository.postFeedback("Saved snippet 📌")
     }
 
     private fun handleClearInputBox() {

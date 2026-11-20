@@ -215,6 +215,7 @@ class PromptBatchRepositoryTest {
         // Auto-Next ON advances from #1 -> #2, and stops cleanly at #2 (no wrap-around)
         repo.setImeReplaceMode(false)
         repo.setImeAutoNext(true)
+        repo.setImeSnippetReplaceMode(true)
         assertEquals("One", repo.markCurrentInserted(autoAdvance = true))
         assertEquals(1, repo.batchState.value.currentIndex)
         assertEquals("Two", repo.markCurrentInserted(autoAdvance = true))
@@ -225,6 +226,7 @@ class PromptBatchRepositoryTest {
         val restarted = DefaultPromptBatchRepository(FileBatchPersistence(stateFile))
         assertFalse(restarted.imePrefs.value.replaceMode)
         assertTrue(restarted.imePrefs.value.autoNext)
+        assertTrue(restarted.imePrefs.value.snippetReplaceMode)
         assertEquals(1, restarted.batchState.value.currentIndex)
         assertEquals(setOf(0, 1), restarted.batchState.value.copiedIndices)
     }

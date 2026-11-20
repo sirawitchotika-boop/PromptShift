@@ -1,7 +1,10 @@
 package com.promptshift.app.data
 
 import com.promptshift.app.domain.InstructionProfile
+import com.promptshift.app.domain.PromptSnippet
+import com.promptshift.app.domain.PromptTextComposer
 import com.promptshift.app.domain.ProviderProfile
+import com.promptshift.app.domain.ReasoningEffort
 
 data class PersistedAiConfig(
     val providers: List<ProviderProfile> = emptyList(),
@@ -9,25 +12,55 @@ data class PersistedAiConfig(
     val instructions: List<InstructionProfile> = emptyList(),
     val activeInstructionId: String? = null,
     val defaultPromptCount: Int = 20,
+    val reasoningEffort: ReasoningEffort = ReasoningEffort.DEFAULT,
+    val triggerWords: List<String> = emptyList(),
+    val activeTriggerWord: String? = null,
+    val triggerWordEnabled: Boolean = false,
+    val snippets: List<PromptSnippet> = emptyList(),
+    val recentPrompts: List<String> = emptyList(),
+)
+
+data class SafeBackupFavoriteModels(
+    val providerId: String? = null,
+    val providerName: String,
+    val models: List<String>,
+)
+
+data class SafeBackupPayload(
+    val instructions: List<InstructionProfile> = emptyList(),
+    val snippets: List<PromptSnippet> = emptyList(),
+    val triggerWords: List<String> = emptyList(),
+    val favoriteModels: List<SafeBackupFavoriteModels> = emptyList(),
 )
 
 /**
  * Pure-Kotlin JSON codec for AI Provider metadata, Instruction Profiles,
- * and Instruction-only Export/Import JSON. API keys are NEVER encoded here.
+ * Snippets, Trigger Words, and Safe Export/Import JSON. API keys are NEVER encoded here.
  */
 object AiConfigCodec {
 
     const val EXPORT_FORMAT_TAG = "promptshift-instructions-v1"
+    const val EXPORT_FORMAT_TAG_V2 = "promptshift-backup-v2"
 
     fun encodeConfig(config: PersistedAiConfig): String {
-        val sb = StringBuilder(512)
+        val sb = StringBuilder(1024)
         sb.append('{')
         sb.append("\"defaultPromptCount\":").append(config.defaultPromptCount).append(',')
-        sb.append("\"activeProviderId\":")
+        sb.append("\"reasoningEffort\":")
+        appendJsonString(sb, config.reasoningEffort.name)
+        sb.append(",\"activeProviderId\":")
         appendNullableString(sb, config.activeProviderId)
         sb.append(",\"activeInstructionId\":")
         appendNullableString(sb, config.activeInstructionId)
-        sb.append(",\"providers\":[")
+        sb.append(",\"activeTriggerWord\":")
+        appendNullableString(sb, config.activeTriggerWord)
+        sb.append(",\"triggerWordEnabled\":").append(config.triggerWordEnabled)
+        sb.append(",\"triggerWords\":[")
+        config.triggerWords.forEachIndexed { idx, tw ->
+            if (idx > 0) sb.append(',')
+            appendJsonString(sb, tw)
+        }
+        sb.append("],\"providers\":[")
         config.providers.forEachIndexed { idx, p ->
             if (idx > 0) sb.append(',')
             sb.append("{\"id\":")
@@ -38,7 +71,12 @@ object AiConfigCodec {
             appendJsonString(sb, p.baseUrl)
             sb.append(",\"modelId\":")
             appendJsonString(sb, p.modelId)
-            sb.append('}')
+            sb.append(",\"favoriteModels\":[")
+            p.favoriteModels.forEachIndexed { mIdx, model ->
+                if (mIdx > 0) sb.append(',')
+                appendJsonString(sb, model)
+            }
+            sb.append("]}")
         }
         sb.append("],\"instructions\":[")
         config.instructions.forEachIndexed { idx, inst ->
@@ -51,6 +89,23 @@ object AiConfigCodec {
             appendJsonString(sb, inst.body)
             sb.append('}')
         }
+        sb.append("],\"snippets\":[")
+        config.snippets.forEachIndexed { idx, snip ->
+            if (idx > 0) sb.append(',')
+            sb.append("{\"id\":")
+            appendJsonString(sb, snip.id)
+            sb.append(",\"title\":")
+            appendJsonString(sb, snip.title)
+            sb.append(",\"body\":")
+            appendJsonString(sb, snip.body)
+            sb.append(",\"includeTriggerWord\":").append(snip.includeTriggerWord)
+            sb.append('}')
+        }
+        sb.append("],\"recentPrompts\":[")
+        config.recentPrompts.forEachIndexed { idx, recent ->
+            if (idx > 0) sb.append(',')
+            appendJsonString(sb, recent)
+        }
         sb.append("]}")
         return sb.toString()
     }
@@ -60,8 +115,16 @@ object AiConfigCodec {
         return try {
             val root = SimpleJsonParser(json).parseValue() as? Map<*, *> ?: return null
             val defaultCount = (root["defaultPromptCount"] as? Number)?.toInt()?.coerceIn(1, 100) ?: 20
+            val reasoningEffort = ReasoningEffort.fromKey(root["reasoningEffort"] as? String)
             val activeProviderId = root["activeProviderId"] as? String
             val activeInstructionId = root["activeInstructionId"] as? String
+            val activeTriggerWord = PromptTextComposer.normalizeTriggerWord(root["activeTriggerWord"] as? String)
+            val triggerWordEnabled = (root["triggerWordEnabled"] as? Boolean) ?: false
+
+            val triggerWords = (root["triggerWords"] as? List<*>)
+                ?.mapNotNull { PromptTextComposer.normalizeTriggerWord(it as? String) }
+                ?.distinct()
+                ?: emptyList()
 
             val providers = (root["providers"] as? List<*>)?.mapNotNull { item ->
                 val map = item as? Map<*, *> ?: return@mapNotNull null
@@ -69,10 +132,20 @@ object AiConfigCodec {
                 val name = (map["name"] as? String)?.trim().orEmpty()
                 val baseUrl = (map["baseUrl"] as? String)?.trim().orEmpty()
                 val modelId = (map["modelId"] as? String)?.trim().orEmpty()
+                val favs = (map["favoriteModels"] as? List<*>)
+                    ?.mapNotNull { (it as? String)?.trim()?.takeIf { s -> s.isNotEmpty() } }
+                    ?.distinct()
+                    ?: emptyList()
                 if (id.isEmpty() || name.isEmpty() || baseUrl.isEmpty() || modelId.isEmpty()) {
                     null
                 } else {
-                    ProviderProfile(id = id, name = name, baseUrl = baseUrl, modelId = modelId)
+                    ProviderProfile(
+                        id = id,
+                        name = name,
+                        baseUrl = baseUrl,
+                        modelId = modelId,
+                        favoriteModels = favs,
+                    )
                 }
             } ?: emptyList()
 
@@ -88,12 +161,42 @@ object AiConfigCodec {
                 }
             } ?: emptyList()
 
+            val snippets = (root["snippets"] as? List<*>)?.mapNotNull { item ->
+                val map = item as? Map<*, *> ?: return@mapNotNull null
+                val id = (map["id"] as? String)?.trim().orEmpty()
+                val title = (map["title"] as? String)?.trim().orEmpty()
+                val body = (map["body"] as? String)?.trim().orEmpty()
+                val includeTrigger = (map["includeTriggerWord"] as? Boolean) ?: false
+                if (id.isEmpty() || title.isEmpty() || body.isEmpty()) {
+                    null
+                } else {
+                    PromptSnippet(
+                        id = id,
+                        title = title,
+                        body = body,
+                        includeTriggerWord = includeTrigger,
+                    )
+                }
+            } ?: emptyList()
+
+            val recentPrompts = (root["recentPrompts"] as? List<*>)
+                ?.mapNotNull { (it as? String)?.trim()?.takeIf { s -> s.isNotEmpty() } }
+                ?.distinct()
+                ?.take(10)
+                ?: emptyList()
+
             PersistedAiConfig(
                 providers = providers,
                 activeProviderId = activeProviderId,
                 instructions = instructions,
                 activeInstructionId = activeInstructionId,
                 defaultPromptCount = defaultCount,
+                reasoningEffort = reasoningEffort,
+                triggerWords = triggerWords,
+                activeTriggerWord = activeTriggerWord,
+                triggerWordEnabled = triggerWordEnabled,
+                snippets = snippets,
+                recentPrompts = recentPrompts,
             )
         } catch (_: Exception) {
             null
@@ -101,7 +204,7 @@ object AiConfigCodec {
     }
 
     /**
-     * Exports ONLY Instruction Profiles (zero provider URLs or API keys).
+     * Exports ONLY Instruction Profiles (v1 format, zero provider URLs or API keys).
      */
     fun encodeInstructionExport(instructions: List<InstructionProfile>): String {
         val sb = StringBuilder(256)
@@ -133,17 +236,146 @@ object AiConfigCodec {
                 else -> null
             } ?: return null
 
-            rawList.mapNotNull { item ->
-                val map = item as? Map<*, *> ?: return@mapNotNull null
-                val name = (map["name"] as? String)?.trim().orEmpty()
-                val body = (map["body"] as? String).orEmpty()
-                if (name.isEmpty()) return@mapNotNull null
-                val id = (map["id"] as? String)?.trim().takeUnless { it.isNullOrEmpty() }
-                    ?: "inst_${name.lowercase().replace(Regex("[^a-z0-9]+"), "_")}_${body.hashCode().toUInt()}"
-                InstructionProfile(id = id, name = name, body = body)
-            }
+            parseInstructionList(rawList)
         } catch (_: Exception) {
             null
+        }
+    }
+
+    /**
+     * Expanded Safe Backup JSON (v2): Instruction Profiles + Saved Snippets +
+     * Trigger Word Chips + Favorite Model IDs. Strictly ZERO API keys or base URLs.
+     */
+    fun encodeSafeBackup(payload: SafeBackupPayload): String {
+        val sb = StringBuilder(512)
+        sb.append("{\n  \"format\": ")
+        appendJsonString(sb, EXPORT_FORMAT_TAG_V2)
+
+        sb.append(",\n  \"profiles\": [")
+        payload.instructions.forEachIndexed { idx, inst ->
+            if (idx > 0) sb.append(',')
+            sb.append("\n    {\n      \"id\": ")
+            appendJsonString(sb, inst.id)
+            sb.append(",\n      \"name\": ")
+            appendJsonString(sb, inst.name)
+            sb.append(",\n      \"body\": ")
+            appendJsonString(sb, inst.body)
+            sb.append("\n    }")
+        }
+        if (payload.instructions.isNotEmpty()) sb.append("\n  ")
+
+        sb.append("],\n  \"snippets\": [")
+        payload.snippets.forEachIndexed { idx, snip ->
+            if (idx > 0) sb.append(',')
+            sb.append("\n    {\n      \"id\": ")
+            appendJsonString(sb, snip.id)
+            sb.append(",\n      \"title\": ")
+            appendJsonString(sb, snip.title)
+            sb.append(",\n      \"body\": ")
+            appendJsonString(sb, snip.body)
+            sb.append(",\n      \"includeTriggerWord\": ").append(snip.includeTriggerWord)
+            sb.append("\n    }")
+        }
+        if (payload.snippets.isNotEmpty()) sb.append("\n  ")
+
+        sb.append("],\n  \"triggerWords\": [")
+        payload.triggerWords.forEachIndexed { idx, tw ->
+            if (idx > 0) sb.append(", ")
+            appendJsonString(sb, tw)
+        }
+
+        sb.append("],\n  \"favoriteModels\": [")
+        payload.favoriteModels.forEachIndexed { idx, entry ->
+            if (idx > 0) sb.append(',')
+            sb.append("\n    {\n      \"providerId\": ")
+            appendNullableString(sb, entry.providerId)
+            sb.append(",\n      \"providerName\": ")
+            appendJsonString(sb, entry.providerName)
+            sb.append(",\n      \"models\": [")
+            entry.models.forEachIndexed { mIdx, model ->
+                if (mIdx > 0) sb.append(", ")
+                appendJsonString(sb, model)
+            }
+            sb.append("]\n    }")
+        }
+        if (payload.favoriteModels.isNotEmpty()) sb.append("\n  ")
+        sb.append("]\n}\n")
+        return sb.toString()
+    }
+
+    fun decodeSafeBackup(json: String): SafeBackupPayload? {
+        if (json.isBlank()) return null
+        return try {
+            val parsed = SimpleJsonParser(json).parseValue() ?: return null
+            if (parsed is List<*>) {
+                return SafeBackupPayload(instructions = parseInstructionList(parsed))
+            }
+            val map = parsed as? Map<*, *> ?: return null
+            val rawProfiles = (map["profiles"] as? List<*>) ?: (map["instructions"] as? List<*>)
+            val rawSnippets = map["snippets"] as? List<*>
+            val rawTriggers = map["triggerWords"] as? List<*>
+            val rawFavModels = map["favoriteModels"] as? List<*>
+
+            if (rawProfiles == null && rawSnippets == null && rawTriggers == null && rawFavModels == null) {
+                return null
+            }
+
+            val instructions = rawProfiles?.let { parseInstructionList(it) } ?: emptyList()
+            val snippets = rawSnippets?.mapNotNull { item ->
+                val sMap = item as? Map<*, *> ?: return@mapNotNull null
+                val title = (sMap["title"] as? String)?.trim().orEmpty()
+                val body = (sMap["body"] as? String)?.trim().orEmpty()
+                if (title.isEmpty() || body.isEmpty()) return@mapNotNull null
+                val includeTrigger = (sMap["includeTriggerWord"] as? Boolean) ?: false
+                val id = (sMap["id"] as? String)?.trim().takeUnless { it.isNullOrEmpty() }
+                    ?: "snip_${title.lowercase().replace(Regex("[^a-z0-9]+"), "_")}_${body.hashCode().toUInt()}"
+                PromptSnippet(id = id, title = title, body = body, includeTriggerWord = includeTrigger)
+            } ?: emptyList()
+
+            val triggerWords = rawTriggers
+                ?.mapNotNull { PromptTextComposer.normalizeTriggerWord(it as? String) }
+                ?.distinct()
+                ?: emptyList()
+
+            val favoriteModels = rawFavModels?.mapNotNull { item ->
+                val fMap = item as? Map<*, *> ?: return@mapNotNull null
+                val providerId = (fMap["providerId"] as? String)?.trim()?.takeIf { it.isNotEmpty() }
+                val providerName = (fMap["providerName"] as? String)?.trim().orEmpty()
+                val models = (fMap["models"] as? List<*>)
+                    ?.mapNotNull { (it as? String)?.trim()?.takeIf { s -> s.isNotEmpty() } }
+                    ?.distinct()
+                    ?: emptyList()
+                if (models.isEmpty() || (providerId == null && providerName.isEmpty())) {
+                    null
+                } else {
+                    SafeBackupFavoriteModels(
+                        providerId = providerId,
+                        providerName = providerName,
+                        models = models,
+                    )
+                }
+            } ?: emptyList()
+
+            SafeBackupPayload(
+                instructions = instructions,
+                snippets = snippets,
+                triggerWords = triggerWords,
+                favoriteModels = favoriteModels,
+            )
+        } catch (_: Exception) {
+            null
+        }
+    }
+
+    private fun parseInstructionList(rawList: List<*>): List<InstructionProfile> {
+        return rawList.mapNotNull { item ->
+            val map = item as? Map<*, *> ?: return@mapNotNull null
+            val name = (map["name"] as? String)?.trim().orEmpty()
+            val body = (map["body"] as? String).orEmpty()
+            if (name.isEmpty()) return@mapNotNull null
+            val id = (map["id"] as? String)?.trim().takeUnless { it.isNullOrEmpty() }
+                ?: "inst_${name.lowercase().replace(Regex("[^a-z0-9]+"), "_")}_${body.hashCode().toUInt()}"
+            InstructionProfile(id = id, name = name, body = body)
         }
     }
 

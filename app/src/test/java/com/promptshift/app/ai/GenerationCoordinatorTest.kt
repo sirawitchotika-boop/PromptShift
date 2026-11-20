@@ -11,6 +11,7 @@ import com.promptshift.app.domain.ConnectionTestResult
 import com.promptshift.app.domain.GenerationState
 import com.promptshift.app.domain.InstructionProfile
 import com.promptshift.app.domain.ProviderProfile
+import com.promptshift.app.domain.ReasoningEffort
 import com.promptshift.app.domain.StartGenerationResult
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -48,6 +49,11 @@ class GenerationCoordinatorTest {
         val batchRepo = DefaultPromptBatchRepository(MemoryBatchPersistence())
         val configRepo = DefaultAiConfigRepository(MemoryConfigPersistence(), MemoryKeyStore())
         configRepo.saveProvider(null, "Primary", "https://api.example.com/v1", "model-1", "sk-secret-123")
+        configRepo.setReasoningEffort(ReasoningEffort.MEDIUM)
+        configRepo.addTriggerWordChip("ohwx woman")
+
+        var capturedEffort: ReasoningEffort? = null
+        var capturedTrigger: String? = null
 
         val fakeClient = object : AiStreamingClient {
             override suspend fun streamPrompts(
@@ -56,8 +62,12 @@ class GenerationCoordinatorTest {
                 instruction: InstructionProfile?,
                 direction: String,
                 promptCount: Int,
+                reasoningEffort: ReasoningEffort,
+                activeTriggerWord: String?,
                 onPromptCompleted: (String) -> Unit,
             ): Int {
+                capturedEffort = reasoningEffort
+                capturedTrigger = activeTriggerWord
                 onPromptCompleted("Streamed slot 1")
                 onPromptCompleted("Streamed slot 2")
                 return 2
@@ -77,11 +87,13 @@ class GenerationCoordinatorTest {
         assertEquals(StartGenerationResult.NeedsOverwriteConfirmation(2), guarded)
         assertEquals(listOf("Old 1", "Old 2"), batchRepo.batchState.value.prompts)
 
-        // Confirmed -> replaces and streams live
+        // Confirmed -> replaces and streams live with reasoningEffort & activeTriggerWord
         val started = coordinator.startGeneration("new theme", 2, allowReplaceExisting = true)
         assertEquals(StartGenerationResult.Started, started)
         advanceUntilIdle()
 
+        assertEquals(ReasoningEffort.MEDIUM, capturedEffort)
+        assertEquals("ohwx woman", capturedTrigger)
         assertEquals(listOf("Streamed slot 1", "Streamed slot 2"), batchRepo.batchState.value.prompts)
         assertEquals(GenerationState.Completed(2, cancelled = false), coordinator.generationState.value)
 
@@ -108,6 +120,8 @@ class GenerationCoordinatorTest {
                 instruction: InstructionProfile?,
                 direction: String,
                 promptCount: Int,
+                reasoningEffort: ReasoningEffort,
+                activeTriggerWord: String?,
                 onPromptCompleted: (String) -> Unit,
             ): Int {
                 onPromptCompleted("Unlocked #1")

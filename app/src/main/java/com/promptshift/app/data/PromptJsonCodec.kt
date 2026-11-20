@@ -10,6 +10,7 @@ data class PersistedBatchSnapshot(
     val isCollapsed: Boolean = false,
     val imeReplaceMode: Boolean = true,
     val imeAutoNext: Boolean = false,
+    val imeSnippetReplaceMode: Boolean = false,
 )
 
 /**
@@ -29,6 +30,7 @@ object PromptJsonCodec {
         sb.append("\"isCollapsed\":").append(snapshot.isCollapsed).append(',')
         sb.append("\"imeReplaceMode\":").append(snapshot.imeReplaceMode).append(',')
         sb.append("\"imeAutoNext\":").append(snapshot.imeAutoNext).append(',')
+        sb.append("\"imeSnippetReplaceMode\":").append(snapshot.imeSnippetReplaceMode).append(',')
         sb.append("\"copiedIndices\":[")
         snapshot.copiedIndices.sorted().forEachIndexed { idx, value ->
             if (idx > 0) sb.append(',')
@@ -59,6 +61,7 @@ object PromptJsonCodec {
             var isCollapsed = false
             var imeReplaceMode = true
             var imeAutoNext = false
+            var imeSnippetReplaceMode = false
 
             reader.skipWhitespace()
             if (!reader.peekChar('}')) {
@@ -77,6 +80,7 @@ object PromptJsonCodec {
                         "isCollapsed" -> isCollapsed = reader.readBoolean() ?: return null
                         "imeReplaceMode" -> imeReplaceMode = reader.readBoolean() ?: return null
                         "imeAutoNext" -> imeAutoNext = reader.readBoolean() ?: return null
+                        "imeSnippetReplaceMode" -> imeSnippetReplaceMode = reader.readBoolean() ?: return null
                         "copiedIndices" -> copiedIndices = reader.readIntList()?.toSet() ?: return null
                         "prompts" -> prompts = reader.readStringList() ?: return null
                         else -> if (!reader.skipValue()) return null
@@ -104,6 +108,7 @@ object PromptJsonCodec {
                 isCollapsed = isCollapsed,
                 imeReplaceMode = imeReplaceMode,
                 imeAutoNext = imeAutoNext,
+                imeSnippetReplaceMode = imeSnippetReplaceMode,
             )
         } catch (_: Exception) {
             null

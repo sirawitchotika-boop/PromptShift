@@ -3,6 +3,7 @@ package com.promptshift.app.ime
 import android.content.Context
 import android.view.inputmethod.InputConnection
 import com.promptshift.app.clipboard.ClipboardHelper
+import com.promptshift.app.domain.PromptTextComposer
 
 enum class InsertOutcome {
     InsertedDirect,
@@ -21,6 +22,7 @@ interface ImeConnectionAdapter {
     fun performSelectAll(): Boolean
     fun performPaste(): Boolean
     fun commitText(text: String): Boolean
+    fun getTextBeforeCursor(maxChars: Int): String? = null
     fun getTextBeforeCursorLength(maxChars: Int): Int
     fun getTextAfterCursorLength(maxChars: Int): Int
     fun deleteSurroundingText(beforeLength: Int, afterLength: Int): Boolean
@@ -49,6 +51,9 @@ class AndroidImeConnectionAdapter(
     override fun commitText(text: String): Boolean =
         inputConnection.commitText(text, 1)
 
+    override fun getTextBeforeCursor(maxChars: Int): String? =
+        inputConnection.getTextBeforeCursor(maxChars, 0)?.toString()
+
     override fun getTextBeforeCursorLength(maxChars: Int): Int =
         inputConnection.getTextBeforeCursor(maxChars, 0)?.length ?: 0
 
@@ -69,6 +74,7 @@ class AndroidImeConnectionAdapter(
 object PromptInsertEngine {
 
     private const val MAX_CLEAR_SCAN = 25_000
+    private const val SMART_JOIN_LOOKBACK = 64
 
     fun insert(
         prompt: String,
@@ -100,6 +106,29 @@ object PromptInsertEngine {
         } finally {
             adapter.endBatchEdit()
         }
+    }
+
+    /**
+     * Inserts a Saved Snippet or Recent Prompt:
+     * - When [replaceExisting] is false (default `Snip: +`), auto-types at cursor with smart `", "` joining.
+     * - When [replaceExisting] is true (`Snip: Rep`), replaces the whole input box.
+     */
+    fun insertSnippet(
+        snippetText: String,
+        replaceExisting: Boolean,
+        adapter: ImeConnectionAdapter?,
+    ): InsertOutcome {
+        if (adapter == null) return InsertOutcome.NoInputConnection
+        val cleaned = snippetText.trim()
+        if (cleaned.isEmpty()) return InsertOutcome.InsertedDirect
+
+        val payload = if (replaceExisting) {
+            cleaned
+        } else {
+            val before = adapter.getTextBeforeCursor(SMART_JOIN_LOOKBACK)
+            PromptTextComposer.formatSmartJoin(before, cleaned)
+        }
+        return insert(payload, replaceExisting = replaceExisting, adapter = adapter)
     }
 
     fun clearInputBox(adapter: ImeConnectionAdapter?): Boolean {
