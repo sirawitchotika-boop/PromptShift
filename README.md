@@ -78,3 +78,8 @@ GitHub Actions (`.github/workflows/android-apk.yml`) runs on every push and pull
 | **`v2.0.0` (`versionCode 3`)** | Phase 2: Direct OpenAI-compatible SSE streaming, Android Keystore API key encryption, Provider & Instruction Profiles, and Quick-Direction popup. |
 | **`v1.1.0` (`versionCode 2`)** | Provider-agnostic AI Format Helper (`===PROMPT===`). |
 | **`v1.0.0` (`versionCode 1`)** | Initial GT Carbon & Crimson Floating Overlay Bubble, batch parser, 2,000-char soft quota, and Realme readiness strip. |
+---
+
+## Maintenance
+
+PromptShift uses GitHub pull requests and automated CI checks to validate changes before merging into `main`.
