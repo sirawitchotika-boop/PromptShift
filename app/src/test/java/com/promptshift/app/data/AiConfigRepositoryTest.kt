@@ -263,4 +263,51 @@ class AiConfigRepositoryTest {
         val reloadedCleared = DefaultAiConfigRepository(FileAiConfigPersistence(file), InMemoryApiKeyStore())
         assertEquals(null, reloadedCleared.configState.value.preferredReturnImeId)
     }
+
+    @Test
+    fun `recentDirections deduplicates to top, caps at 8, clears, and persists`() {
+        val file = File(tempFolder.root, "recent_directions.json")
+        val repo = DefaultAiConfigRepository(FileAiConfigPersistence(file), InMemoryApiKeyStore())
+
+        assertEquals(emptyList<String>(), repo.configState.value.recentDirections)
+        repo.recordRecentDirection("   ")
+        assertEquals(emptyList<String>(), repo.configState.value.recentDirections)
+
+        for (i in 1..10) {
+            repo.recordRecentDirection("Direction #$i")
+        }
+        // Capped at 8, most recent first
+        assertEquals(8, repo.configState.value.recentDirections.size)
+        assertEquals("Direction #10", repo.configState.value.recentDirections.first())
+        assertEquals("Direction #3", repo.configState.value.recentDirections.last())
+
+        // Re-recording an older item moves it back to top without duplicating
+        repo.recordRecentDirection("Direction #5")
+        assertEquals(8, repo.configState.value.recentDirections.size)
+        assertEquals("Direction #5", repo.configState.value.recentDirections.first())
+
+        val reloaded = DefaultAiConfigRepository(FileAiConfigPersistence(file), InMemoryApiKeyStore())
+        assertEquals(repo.configState.value.recentDirections, reloaded.configState.value.recentDirections)
+
+        reloaded.clearRecentDirections()
+        assertEquals(emptyList<String>(), reloaded.configState.value.recentDirections)
+    }
+
+    @Test
+    fun `timerPillEnabled and saved pill position persist cleanly across reload`() {
+        val file = File(tempFolder.root, "timer_pill_prefs.json")
+        val repo = DefaultAiConfigRepository(FileAiConfigPersistence(file), InMemoryApiKeyStore())
+
+        assertTrue(repo.configState.value.timerPillEnabled)
+        assertEquals(null, repo.configState.value.timerPillX)
+        assertEquals(null, repo.configState.value.timerPillY)
+
+        repo.setTimerPillPosition(240, 96)
+        repo.setTimerPillEnabled(false)
+
+        val reloaded = DefaultAiConfigRepository(FileAiConfigPersistence(file), InMemoryApiKeyStore())
+        assertFalse(reloaded.configState.value.timerPillEnabled)
+        assertEquals(240, reloaded.configState.value.timerPillX)
+        assertEquals(96, reloaded.configState.value.timerPillY)
+    }
 }

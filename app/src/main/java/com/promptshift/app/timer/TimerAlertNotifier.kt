@@ -21,11 +21,12 @@ import com.promptshift.app.ui.TimerPopupActivity
 object TimerAlertNotifier {
 
     const val TIMER_CHANNEL_ID = "promptshift_timer_alert_channel"
-    const val TIMER_RUNNING_CHANNEL_ID = "promptshift_timer_running_channel"
+    const val TIMER_RUNNING_CHANNEL_ID = "promptshift_timer_running_channel_v2"
     const val TIMER_NOTIFICATION_ID = 1005
     const val TIMER_RUNNING_NOTIFICATION_ID = 1006
     const val ACTION_DISMISS_TIMER_ALERT = "com.promptshift.app.action.DISMISS_TIMER_ALERT"
     const val ACTION_CANCEL_RUNNING_TIMER = "com.promptshift.app.action.CANCEL_RUNNING_TIMER"
+    private const val EXTRA_REQUEST_PROMOTED_ONGOING = "android.requestPromotedOngoing"
 
     // 6 crisp pulses totaling 3.7 seconds (~4s), repeat = -1 (auto-stops cleanly)
     private val PULSE_TIMINGS_MS = longArrayOf(
@@ -38,7 +39,7 @@ object TimerAlertNotifier {
             val channel = NotificationChannel(
                 TIMER_RUNNING_CHANNEL_ID,
                 context.getString(R.string.timer_running_channel_name),
-                NotificationManager.IMPORTANCE_LOW,
+                NotificationManager.IMPORTANCE_DEFAULT,
             ).apply {
                 description = context.getString(R.string.timer_running_channel_desc)
                 enableVibration(false)
@@ -68,6 +69,10 @@ object TimerAlertNotifier {
                 PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
             )
 
+            val promotedExtras = android.os.Bundle().apply {
+                putBoolean(EXTRA_REQUEST_PROMOTED_ONGOING, true)
+            }
+
             val notification = NotificationCompat.Builder(context, TIMER_RUNNING_CHANNEL_ID)
                 .setSmallIcon(R.drawable.ic_notification_promptshift)
                 .setContentTitle(context.getString(R.string.timer_running_title))
@@ -79,8 +84,9 @@ object TimerAlertNotifier {
                 .setOngoing(true)
                 .setSilent(true)
                 .setOnlyAlertOnce(true)
-                .setPriority(NotificationCompat.PRIORITY_LOW)
+                .setPriority(NotificationCompat.PRIORITY_DEFAULT)
                 .setCategory(NotificationCompat.CATEGORY_PROGRESS)
+                .addExtras(promotedExtras)
                 .setContentIntent(openPending)
                 .addAction(0, context.getString(R.string.timer_action_cancel), cancelPending)
                 .build()

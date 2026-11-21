@@ -20,6 +20,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
@@ -88,6 +89,7 @@ class QuickDirectionActivity : ComponentActivity() {
                     onSelectReasoningEffort = { configRepo.setReasoningEffort(it) },
                     onToggleTriggerWordChip = { configRepo.toggleTriggerWordChip(it) },
                     onSetTriggerWordEnabled = { configRepo.setTriggerWordEnabled(it) },
+                    onClearRecentDirections = { configRepo.clearRecentDirections() },
                     onStartGeneration = { direction, count, allowReplace ->
                         coordinator.startGeneration(
                             direction = direction,
@@ -132,6 +134,7 @@ private fun QuickDirectionPopupContent(
     onSelectReasoningEffort: (ReasoningEffort) -> Unit,
     onToggleTriggerWordChip: (String) -> Unit,
     onSetTriggerWordEnabled: (Boolean) -> Unit,
+    onClearRecentDirections: () -> Unit,
     onStartGeneration: (String, Int, Boolean) -> StartGenerationResult,
     onCancelStream: () -> Unit,
     onOpenHub: () -> Unit,
@@ -368,6 +371,19 @@ private fun QuickDirectionPopupContent(
                         }
                     }
 
+                    // Vertically scrollable recent Direction history (tap to fill)
+                    if (config.recentDirections.isNotEmpty()) {
+                        RecentDirectionsHistoryBox(
+                            recentDirections = config.recentDirections,
+                            currentDraft = direction,
+                            onSelectDirection = { chosen ->
+                                direction = chosen
+                                errorMessage = null
+                            },
+                            onClear = onClearRecentDirections,
+                        )
+                    }
+
                     // Direction box
                     OutlinedTextField(
                         value = direction,
@@ -593,3 +609,81 @@ internal fun darkInputColors() = OutlinedTextFieldDefaults.colors(
     unfocusedLabelColor = PromptShiftColors.TextMuted,
     cursorColor = PromptShiftColors.GtCrimson,
 )
+
+@Composable
+internal fun RecentDirectionsHistoryBox(
+    recentDirections: List<String>,
+    currentDraft: String,
+    onSelectDirection: (String) -> Unit,
+    onClear: () -> Unit,
+) {
+    Column(
+        modifier = Modifier.fillMaxWidth(),
+        verticalArrangement = Arrangement.spacedBy(6.dp),
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                text = "RECENT DIRECTIONS (TAP TO REUSE)",
+                color = PromptShiftColors.TextMuted,
+                fontSize = 10.5.sp,
+                fontWeight = FontWeight.Bold,
+                letterSpacing = 0.8.sp,
+            )
+            Text(
+                text = "Clear",
+                color = PromptShiftColors.TextMuted,
+                fontSize = 11.sp,
+                fontWeight = FontWeight.Bold,
+                modifier = Modifier
+                    .clip(RoundedCornerShape(8.dp))
+                    .background(PromptShiftColors.CarbonElevated)
+                    .clickable(onClick = onClear)
+                    .padding(horizontal = 8.dp, vertical = 3.dp),
+            )
+        }
+
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .heightIn(max = 128.dp)
+                .clip(RoundedCornerShape(12.dp))
+                .background(PromptShiftColors.ObsidianBg)
+                .border(1.dp, PromptShiftColors.MetalBorder, RoundedCornerShape(12.dp))
+                .verticalScroll(rememberScrollState())
+                .padding(6.dp),
+            verticalArrangement = Arrangement.spacedBy(5.dp),
+        ) {
+            recentDirections.forEach { item ->
+                val isSelected = currentDraft.trim() == item
+                val itemBg = if (isSelected) PromptShiftColors.CopiedEmeraldBg else PromptShiftColors.CarbonElevated
+                val itemBorder = if (isSelected) {
+                    PromptShiftColors.CopiedEmerald.copy(alpha = 0.7f)
+                } else {
+                    PromptShiftColors.MetalBorder.copy(alpha = 0.7f)
+                }
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(9.dp))
+                        .background(itemBg)
+                        .border(1.dp, itemBorder, RoundedCornerShape(9.dp))
+                        .clickable { onSelectDirection(item) }
+                        .padding(horizontal = 10.dp, vertical = 7.dp),
+                ) {
+                    Text(
+                        text = item,
+                        color = if (isSelected) PromptShiftColors.CopiedEmerald else PromptShiftColors.TextPrimary,
+                        fontSize = 12.sp,
+                        lineHeight = 16.sp,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+            }
+        }
+    }
+}
