@@ -10,11 +10,20 @@ import com.promptshift.app.PromptShiftApp
  */
 class TimerAlertReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent?) {
-        if (intent?.action == TimerAlertNotifier.ACTION_DISMISS_TIMER_ALERT) {
-            TimerAlertNotifier.dismissAlert(context)
-            try {
-                PromptShiftApp.from(context).timerManager.dismissFinishedAlert()
-            } catch (_: Exception) {
+        when (intent?.action) {
+            TimerAlertNotifier.ACTION_DISMISS_TIMER_ALERT -> {
+                TimerAlertNotifier.dismissAlert(context)
+                try {
+                    PromptShiftApp.from(context).timerManager.dismissFinishedAlert()
+                } catch (_: Exception) {
+                }
+            }
+            TimerAlertNotifier.ACTION_CANCEL_RUNNING_TIMER -> {
+                TimerAlertNotifier.cancelRunningNotification(context)
+                try {
+                    PromptShiftApp.from(context).timerManager.cancel()
+                } catch (_: Exception) {
+                }
             }
         }
     }

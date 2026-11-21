@@ -7,6 +7,11 @@ import android.os.PowerManager
 import android.provider.Settings
 import android.view.inputmethod.InputMethodManager
 
+data class EnabledKeyboardOption(
+    val id: String,
+    val label: String,
+)
+
 data class RealmeReadinessState(
     val canDrawOverlays: Boolean,
     val isIgnoringBatteryOptimizations: Boolean,
@@ -28,12 +33,7 @@ object RealmeReadinessHelper {
             emptyList()
         }
         val imeEnabled = enabledList.any { it.packageName == context.packageName }
-        val defaultIme = try {
-            Settings.Secure.getString(context.contentResolver, Settings.Secure.DEFAULT_INPUT_METHOD).orEmpty()
-        } catch (_: Exception) {
-            ""
-        }
-        val imeActive = defaultIme.startsWith("${context.packageName}/")
+        val imeActive = isPromptShiftKeyboardActive(context)
 
         return RealmeReadinessState(
             canDrawOverlays = overlayGranted,
@@ -41,6 +41,37 @@ object RealmeReadinessHelper {
             isPromptShiftKeyboardEnabled = imeEnabled,
             isPromptShiftKeyboardActive = imeActive,
         )
+    }
+
+    fun isPromptShiftKeyboardActive(context: Context): Boolean {
+        val defaultIme = try {
+            Settings.Secure.getString(context.contentResolver, Settings.Secure.DEFAULT_INPUT_METHOD).orEmpty()
+        } catch (_: Exception) {
+            ""
+        }
+        return defaultIme.startsWith("${context.packageName}/")
+    }
+
+    fun getOtherEnabledKeyboards(context: Context): List<EnabledKeyboardOption> {
+        val imm = context.getSystemService(Context.INPUT_METHOD_SERVICE) as? InputMethodManager
+            ?: return emptyList()
+        val pm = context.packageManager
+        return try {
+            imm.enabledInputMethodList
+                .filter { it.packageName != context.packageName }
+                .map { info ->
+                    val label = try {
+                        info.loadLabel(pm)?.toString()?.trim().orEmpty()
+                    } catch (_: Exception) {
+                        ""
+                    }.ifBlank { info.packageName }
+                    EnabledKeyboardOption(id = info.id, label = label)
+                }
+                .distinctBy { it.id }
+                .sortedBy { it.label.lowercase() }
+        } catch (_: Exception) {
+            emptyList()
+        }
     }
 
     fun openOverlayPermissionSettings(context: Context) {

@@ -13,6 +13,8 @@ import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -43,6 +45,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.promptshift.app.PromptShiftApp
+import com.promptshift.app.ime.PromptShiftImeService
 import com.promptshift.app.timer.TimerState
 import com.promptshift.app.ui.theme.PromptShiftColors
 import com.promptshift.app.ui.theme.PromptShiftTheme
@@ -52,22 +55,38 @@ import com.promptshift.app.ui.theme.PromptShiftTheme
  */
 class TimerPopupActivity : ComponentActivity() {
 
+    private var hasTriggeredKeyboardReturn = false
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
         val app = PromptShiftApp.from(this)
         val timerManager = app.timerManager
+        val aiConfigRepository = app.aiConfigRepository
 
         setContent {
             PromptShiftTheme {
                 val timerState by timerManager.state.collectAsStateWithLifecycle()
+                val aiConfig by aiConfigRepository.configState.collectAsStateWithLifecycle()
 
                 TimerPopupContent(
                     timerState = timerState,
+                    presetsSeconds = aiConfig.timerPresetsSeconds,
                     onStart = { min, sec ->
                         if (timerManager.start(min, sec)) {
                             finish()
                         }
+                    },
+                    onStartPreset = { totalSeconds ->
+                        if (timerManager.startTotalSeconds(totalSeconds)) {
+                            finish()
+                        }
+                    },
+                    onSavePreset = { min, sec ->
+                        aiConfigRepository.addTimerPreset(min, sec)
+                    },
+                    onRemovePreset = { totalSeconds ->
+                        aiConfigRepository.removeTimerPreset(totalSeconds)
                     },
                     onCancel = { timerManager.cancel() },
                     onReset = { timerManager.reset() },
@@ -76,6 +95,19 @@ class TimerPopupActivity : ComponentActivity() {
                 )
             }
         }
+    }
+
+    override fun finish() {
+        if (!hasTriggeredKeyboardReturn) {
+            hasTriggeredKeyboardReturn = true
+            val preferredImeId = PromptShiftApp.from(this)
+                .aiConfigRepository
+                .configState
+                .value
+                .preferredReturnImeId
+            PromptShiftImeService.switchKeyboardAfterTimerPopup(this, preferredImeId)
+        }
+        super.finish()
     }
 
     companion object {
@@ -91,10 +123,15 @@ class TimerPopupActivity : ComponentActivity() {
     }
 }
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun TimerPopupContent(
     timerState: TimerState,
+    presetsSeconds: List<Int>,
     onStart: (Int, Int) -> Unit,
+    onStartPreset: (Int) -> Unit,
+    onSavePreset: (Int, Int) -> Boolean,
+    onRemovePreset: (Int) -> Unit,
     onCancel: () -> Unit,
     onReset: () -> Unit,
     onDismissAlert: () -> Unit,
@@ -102,7 +139,9 @@ private fun TimerPopupContent(
 ) {
     var minutesInput by remember { mutableStateOf("") }
     var secondsInput by remember { mutableStateOf("") }
-    var validationError by remember { mutableStateOf<String?>(null) }
+    var statusMessage by remember { mutableStateOf<String?>(null) }
+    var statusIsError by remember { mutableStateOf(false) }
+    var isEditingPresets by remember { mutableStateOf(false) }
 
     Box(
         modifier = Modifier
@@ -241,6 +280,87 @@ private fun TimerPopupContent(
                         }
                     }
 
+                    // Quick 1-tap Presets section
+                    Column(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Text(
+                                text = if (isEditingPresets) "TAP PRESET TO REMOVE" else "QUICK PRESETS (1-TAP START)",
+                                color = if (isEditingPresets) PromptShiftColors.QuotaWarnRed else PromptShiftColors.TextMuted,
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold,
+                                letterSpacing = 0.8.sp,
+                            )
+                            if (presetsSeconds.isNotEmpty()) {
+                                Text(
+                                    text = if (isEditingPresets) "Done" else "Edit",
+                                    color = if (isEditingPresets) PromptShiftColors.CopiedEmerald else PromptShiftColors.TextMuted,
+                                    fontSize = 11.5.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    modifier = Modifier
+                                        .clip(RoundedCornerShape(8.dp))
+                                        .background(PromptShiftColors.CarbonElevated)
+                                        .clickable { isEditingPresets = !isEditingPresets }
+                                        .padding(horizontal = 9.dp, vertical = 4.dp),
+                                )
+                            }
+                        }
+
+                        if (presetsSeconds.isEmpty()) {
+                            Text(
+                                text = "No saved presets yet — enter Min/Sec below and tap + Save.",
+                                color = PromptShiftColors.TextMuted,
+                                fontSize = 11.5.sp,
+                            )
+                        } else {
+                            FlowRow(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                verticalArrangement = Arrangement.spacedBy(8.dp),
+                            ) {
+                                presetsSeconds.forEach { totalSec ->
+                                    val label = TimerState.formatPresetLabel(totalSec)
+                                    val borderColor = if (isEditingPresets) {
+                                        PromptShiftColors.QuotaWarnRed.copy(alpha = 0.75f)
+                                    } else {
+                                        PromptShiftColors.MetalBorder
+                                    }
+                                    Box(
+                                        modifier = Modifier
+                                            .clip(RoundedCornerShape(10.dp))
+                                            .background(PromptShiftColors.CarbonElevated)
+                                            .border(1.dp, borderColor, RoundedCornerShape(10.dp))
+                                            .clickable {
+                                                if (isEditingPresets) {
+                                                    onRemovePreset(totalSec)
+                                                    if (presetsSeconds.size <= 1) {
+                                                        isEditingPresets = false
+                                                    }
+                                                } else {
+                                                    onStartPreset(totalSec)
+                                                }
+                                            }
+                                            .padding(horizontal = 12.dp, vertical = 8.dp),
+                                    ) {
+                                        Text(
+                                            text = if (isEditingPresets) "$label  ✕" else label,
+                                            color = if (isEditingPresets) PromptShiftColors.QuotaWarnRed else PromptShiftColors.TextPrimary,
+                                            fontFamily = FontFamily.Monospace,
+                                            fontSize = 13.5.sp,
+                                            fontWeight = FontWeight.Bold,
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.spacedBy(10.dp),
@@ -249,7 +369,7 @@ private fun TimerPopupContent(
                             value = minutesInput,
                             onValueChange = { raw ->
                                 minutesInput = raw.filter { it.isDigit() }.take(3)
-                                validationError = null
+                                statusMessage = null
                             },
                             label = { Text("Min", fontSize = 12.sp) },
                             placeholder = { Text("0", fontSize = 13.sp) },
@@ -263,7 +383,7 @@ private fun TimerPopupContent(
                             value = secondsInput,
                             onValueChange = { raw ->
                                 secondsInput = raw.filter { it.isDigit() }.take(2)
-                                validationError = null
+                                statusMessage = null
                             },
                             label = { Text("Sec", fontSize = 12.sp) },
                             placeholder = { Text("00", fontSize = 13.sp) },
@@ -275,36 +395,71 @@ private fun TimerPopupContent(
                         )
                     }
 
-                    if (!validationError.isNullOrBlank()) {
+                    if (!statusMessage.isNullOrBlank()) {
                         Text(
-                            text = validationError.orEmpty(),
-                            color = PromptShiftColors.QuotaWarnRed,
+                            text = statusMessage.orEmpty(),
+                            color = if (statusIsError) PromptShiftColors.QuotaWarnRed else PromptShiftColors.CopiedEmerald,
                             fontSize = 12.sp,
                             fontWeight = FontWeight.SemiBold,
                         )
                     }
 
-                    Button(
-                        onClick = {
-                            val min = minutesInput.toIntOrNull() ?: 0
-                            val sec = secondsInput.toIntOrNull() ?: 0
-                            if (min == 0 && sec == 0) {
-                                validationError = "Enter minutes or seconds"
-                            } else {
-                                onStart(min, sec)
-                            }
-                        },
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(46.dp),
-                        shape = RoundedCornerShape(12.dp),
-                        colors = ButtonDefaults.buttonColors(
-                            containerColor = PromptShiftColors.GtCrimson,
-                            contentColor = PromptShiftColors.TextPrimary,
-                        ),
-                        border = BorderStroke(1.dp, PromptShiftColors.GtCrimsonGlow),
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(10.dp),
                     ) {
-                        Text("Start Timer", fontSize = 14.5.sp, fontWeight = FontWeight.Bold)
+                        OutlinedButton(
+                            onClick = {
+                                val min = minutesInput.toIntOrNull() ?: 0
+                                val sec = secondsInput.toIntOrNull() ?: 0
+                                if (min == 0 && sec == 0) {
+                                    statusMessage = "Enter minutes or seconds"
+                                    statusIsError = true
+                                } else if (onSavePreset(min, sec)) {
+                                    val label = TimerState.formatPresetLabel(min.coerceIn(0, 999) * 60 + sec.coerceIn(0, 59))
+                                    statusMessage = "Saved preset $label"
+                                    statusIsError = false
+                                } else {
+                                    statusMessage = "Preset already exists"
+                                    statusIsError = true
+                                }
+                            },
+                            modifier = Modifier
+                                .weight(0.42f)
+                                .height(46.dp),
+                            shape = RoundedCornerShape(12.dp),
+                            border = BorderStroke(1.dp, PromptShiftColors.MetalBorder),
+                            colors = ButtonDefaults.outlinedButtonColors(
+                                containerColor = PromptShiftColors.CarbonElevated,
+                                contentColor = PromptShiftColors.TextPrimary,
+                            ),
+                        ) {
+                            Text("+ Save", fontSize = 13.5.sp, fontWeight = FontWeight.Bold)
+                        }
+
+                        Button(
+                            onClick = {
+                                val min = minutesInput.toIntOrNull() ?: 0
+                                val sec = secondsInput.toIntOrNull() ?: 0
+                                if (min == 0 && sec == 0) {
+                                    statusMessage = "Enter minutes or seconds"
+                                    statusIsError = true
+                                } else {
+                                    onStart(min, sec)
+                                }
+                            },
+                            modifier = Modifier
+                                .weight(0.58f)
+                                .height(46.dp),
+                            shape = RoundedCornerShape(12.dp),
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = PromptShiftColors.GtCrimson,
+                                contentColor = PromptShiftColors.TextPrimary,
+                            ),
+                            border = BorderStroke(1.dp, PromptShiftColors.GtCrimsonGlow),
+                        ) {
+                            Text("Start Timer", fontSize = 14.5.sp, fontWeight = FontWeight.Bold)
+                        }
                     }
                 }
             }

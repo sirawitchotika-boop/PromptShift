@@ -12,4 +12,9 @@
     <string name="timer_done_title">PromptShift Timer Done</string>
     <string name="timer_done_body">Your countdown timer has finished.</string>
     <string name="timer_action_dismiss">Dismiss</string>
+    <string name="timer_running_channel_name">Active Countdown Timer</string>
+    <string name="timer_running_channel_desc">Shows the live countdown timer in the notification shade while running.</string>
+    <string name="timer_running_title">PromptShift Timer</string>
+    <string name="timer_running_body">Tap to open timer controls</string>
+    <string name="timer_action_cancel">Cancel</string>
 </resources>

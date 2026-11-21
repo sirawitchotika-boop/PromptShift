@@ -12,6 +12,7 @@ import com.promptshift.app.clipboard.ClipboardTrampolineActivity
 import com.promptshift.app.domain.PromptSnippet
 import com.promptshift.app.domain.PromptTextComposer
 import com.promptshift.app.ui.QuickDirectionActivity
+import com.promptshift.app.ui.RealmeReadinessHelper
 import com.promptshift.app.ui.TimerPopupActivity
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -19,6 +20,7 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
+import java.lang.ref.WeakReference
 
 /**
  * 100% Thai banking-app-safe InputMethodService (standard Android keyboard API, ZERO Accessibility).
@@ -30,9 +32,15 @@ class PromptShiftImeService : InputMethodService() {
     private var viewCollectorJob: Job? = null
     private var viewController: PromptShiftImeViewController? = null
 
+    override fun onCreate() {
+        super.onCreate()
+        activeInstance = WeakReference(this)
+    }
+
     override fun onEvaluateFullscreenMode(): Boolean = false
 
     override fun onCreateInputView(): View {
+        activeInstance = WeakReference(this)
         styleImeWindow()
 
         val app = PromptShiftApp.from(this)
@@ -115,6 +123,9 @@ class PromptShiftImeService : InputMethodService() {
     }
 
     override fun onDestroy() {
+        if (activeInstance?.get() === this) {
+            activeInstance = null
+        }
         viewController?.destroy()
         viewController = null
         imeScope.cancel()
@@ -247,6 +258,22 @@ class PromptShiftImeService : InputMethodService() {
         }
     }
 
+    private fun switchToTargetOrPreviousKeyboard(preferredImeId: String?): Boolean {
+        val targetId = preferredImeId?.trim()?.takeIf { it.isNotEmpty() }
+        if (targetId != null) {
+            val enabledOthers = RealmeReadinessHelper.getOtherEnabledKeyboards(this)
+            if (enabledOthers.any { it.id == targetId }) {
+                try {
+                    switchInputMethod(targetId)
+                    return true
+                } catch (_: Exception) {
+                }
+            }
+        }
+        switchBackToPreviousKeyboard()
+        return true
+    }
+
     @Suppress("DEPRECATION")
     private fun switchBackToPreviousKeyboard() {
         val switched = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
@@ -270,6 +297,19 @@ class PromptShiftImeService : InputMethodService() {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
                 win.isNavigationBarContrastEnforced = false
             }
+        }
+    }
+
+    companion object {
+        @Volatile
+        private var activeInstance: WeakReference<PromptShiftImeService>? = null
+
+        fun switchKeyboardAfterTimerPopup(context: Context, preferredImeId: String?): Boolean {
+            if (!RealmeReadinessHelper.isPromptShiftKeyboardActive(context)) {
+                return false
+            }
+            val service = activeInstance?.get() ?: return false
+            return service.switchToTargetOrPreviousKeyboard(preferredImeId)
         }
     }
 }

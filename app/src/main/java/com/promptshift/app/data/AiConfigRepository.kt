@@ -87,6 +87,10 @@ interface AiConfigRepository {
     fun recordRecentPrompt(prompt: String)
     fun clearRecentPrompts()
 
+    fun addTimerPreset(minutes: Int, seconds: Int): Boolean
+    fun removeTimerPreset(totalSeconds: Int)
+    fun setPreferredReturnImeId(imeId: String?)
+
     fun exportInstructionsJson(): String
     fun importInstructionsJson(json: String): InstructionImportResult
 
@@ -126,6 +130,8 @@ class DefaultAiConfigRepository(
                 triggerWordEnabled = saved.triggerWordEnabled && !saved.activeTriggerWord.isNullOrBlank(),
                 snippets = saved.snippets,
                 recentPrompts = saved.recentPrompts.take(MAX_RECENT_PROMPTS),
+                timerPresetsSeconds = saved.timerPresetsSeconds ?: AiConfigState.DEFAULT_TIMER_PRESETS_SECONDS,
+                preferredReturnImeId = saved.preferredReturnImeId,
             )
         } else {
             AiConfigState()
@@ -559,6 +565,45 @@ class DefaultAiConfigRepository(
         )
     }
 
+    override fun addTimerPreset(minutes: Int, seconds: Int): Boolean {
+        val clampedMin = minutes.coerceIn(0, 999)
+        val clampedSec = seconds.coerceIn(0, 59)
+        val totalSeconds = clampedMin * 60 + clampedSec
+        if (totalSeconds <= 0 || totalSeconds > AiConfigState.MAX_TIMER_PRESET_SECONDS) {
+            return false
+        }
+        synchronized(lock) {
+            val current = _configState.value
+            if (current.timerPresetsSeconds.contains(totalSeconds)) {
+                return false
+            }
+            val updated = (current.timerPresetsSeconds + totalSeconds).distinct().sorted()
+            _configState.value = current.copy(timerPresetsSeconds = updated)
+            persistLocked()
+            return true
+        }
+    }
+
+    override fun removeTimerPreset(totalSeconds: Int) {
+        synchronized(lock) {
+            val current = _configState.value
+            val updated = current.timerPresetsSeconds.filterNot { it == totalSeconds }
+            if (updated.size == current.timerPresetsSeconds.size) return
+            _configState.value = current.copy(timerPresetsSeconds = updated)
+            persistLocked()
+        }
+    }
+
+    override fun setPreferredReturnImeId(imeId: String?) {
+        val normalized = imeId?.trim()?.takeIf { it.isNotEmpty() }
+        synchronized(lock) {
+            val current = _configState.value
+            if (current.preferredReturnImeId == normalized) return
+            _configState.value = current.copy(preferredReturnImeId = normalized)
+            persistLocked()
+        }
+    }
+
     private fun persistLocked() {
         val state = _configState.value
         persistence.save(
@@ -574,6 +619,8 @@ class DefaultAiConfigRepository(
                 triggerWordEnabled = state.triggerWordEnabled,
                 snippets = state.snippets,
                 recentPrompts = state.recentPrompts,
+                timerPresetsSeconds = state.timerPresetsSeconds,
+                preferredReturnImeId = state.preferredReturnImeId,
             ),
         )
     }

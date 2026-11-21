@@ -88,4 +88,36 @@ class CountdownTimerManagerTest {
         assertFalse(manager.state.value.isRunning)
         assertEquals(0L, manager.state.value.remainingMs)
     }
+
+    @Test
+    fun `startTotalSeconds formats preset labels and notifies start and cancel callbacks`() = runTest {
+        assertEquals("00:30", TimerState.formatPresetLabel(30))
+        assertEquals("05:00", TimerState.formatPresetLabel(300))
+
+        var fakeNow = 10_000L
+        val startedTargets = mutableListOf<Long>()
+        var cancelCount = 0
+
+        val manager = CountdownTimerManager(
+            appScope = backgroundScope,
+            clockMs = { fakeNow },
+            tickIntervalMs = 250L,
+            onTimerStarted = { target -> startedTargets.add(target) },
+            onTimerCancelled = { cancelCount++ },
+        )
+
+        assertFalse(manager.startTotalSeconds(0))
+        assertTrue(manager.startTotalSeconds(90))
+        runCurrent()
+
+        assertTrue(manager.state.value.isRunning)
+        assertEquals("01:30", manager.state.value.formattedRemaining())
+        assertEquals(100_000L, manager.state.value.targetEndMs)
+        assertEquals(listOf(100_000L), startedTargets)
+
+        manager.cancel()
+        assertFalse(manager.state.value.isRunning)
+        assertEquals(0L, manager.state.value.targetEndMs)
+        assertEquals(1, cancelCount)
+    }
 }
