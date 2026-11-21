@@ -4,6 +4,7 @@ import android.app.Activity
 import android.app.Application
 import android.content.Context
 import android.os.Bundle
+import com.promptshift.app.ai.AiGenerationForegroundService
 import com.promptshift.app.ai.GenerationCoordinator
 import com.promptshift.app.ai.HttpOpenAiStreamingClient
 import com.promptshift.app.data.AiConfigRepository
@@ -68,6 +69,9 @@ class PromptShiftApp : Application() {
             batchRepository = repository,
             configRepository = aiConfigRepository,
             streamingClient = HttpOpenAiStreamingClient(),
+            onStreamingStarted = {
+                AiGenerationForegroundService.start(this)
+            },
         )
 
         timerManager = CountdownTimerManager(
@@ -90,6 +94,7 @@ class PromptShiftApp : Application() {
         val pillController = TopLeftTimerPillController(
             context = this,
             onPillClicked = { TimerPopupActivity.launch(this) },
+            onPositionSaved = { x, y -> aiConfigRepository.setTimerPillPosition(x, y) },
         )
         topLeftTimerPillController = pillController
 
@@ -118,10 +123,19 @@ class PromptShiftApp : Application() {
         )
 
         appScope.launch {
-            combine(timerManager.state, _isTimerHostUiForeground) { timerState, isHostForeground ->
-                timerState to !isHostForeground
-            }.collect { (timerState, shouldShowPill) ->
-                pillController.update(timerState, shouldShow = shouldShowPill)
+            combine(
+                timerManager.state,
+                _isTimerHostUiForeground,
+                aiConfigRepository.configState,
+            ) { timerState, isHostForeground, config ->
+                Triple(timerState, !isHostForeground && config.timerPillEnabled, config)
+            }.collect { (timerState, shouldShowPill, config) ->
+                pillController.update(
+                    timerState = timerState,
+                    shouldShow = shouldShowPill,
+                    savedX = config.timerPillX,
+                    savedY = config.timerPillY,
+                )
             }
         }
     }

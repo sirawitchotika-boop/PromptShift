@@ -315,6 +315,17 @@ class MainActivity : ComponentActivity() {
                         aiConfigRepository.clearRecentPrompts()
                         showBanner("Recent 10 cleared", isError = false)
                     },
+                    onClearRecentDirections = {
+                        aiConfigRepository.clearRecentDirections()
+                        showBanner("Recent directions cleared", isError = false)
+                    },
+                    onToggleTimerPill = { enabled ->
+                        aiConfigRepository.setTimerPillEnabled(enabled)
+                        showBanner(
+                            if (enabled) "Floating countdown pill ON" else "Floating pill OFF (notification only)",
+                            isError = false,
+                        )
+                    },
                     onStartTimer = { min, sec ->
                         if (timerManager.start(min, sec)) {
                             showBanner("Timer started (${"%02d:%02d".format(min, sec)})", isError = false)

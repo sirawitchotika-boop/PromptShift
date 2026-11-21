@@ -87,9 +87,14 @@ interface AiConfigRepository {
     fun recordRecentPrompt(prompt: String)
     fun clearRecentPrompts()
 
+    fun recordRecentDirection(direction: String)
+    fun clearRecentDirections()
+
     fun addTimerPreset(minutes: Int, seconds: Int): Boolean
     fun removeTimerPreset(totalSeconds: Int)
     fun setPreferredReturnImeId(imeId: String?)
+    fun setTimerPillEnabled(enabled: Boolean)
+    fun setTimerPillPosition(x: Int, y: Int)
 
     fun exportInstructionsJson(): String
     fun importInstructionsJson(json: String): InstructionImportResult
@@ -130,8 +135,12 @@ class DefaultAiConfigRepository(
                 triggerWordEnabled = saved.triggerWordEnabled && !saved.activeTriggerWord.isNullOrBlank(),
                 snippets = saved.snippets,
                 recentPrompts = saved.recentPrompts.take(MAX_RECENT_PROMPTS),
+                recentDirections = saved.recentDirections.take(AiConfigState.MAX_RECENT_DIRECTIONS),
                 timerPresetsSeconds = saved.timerPresetsSeconds ?: AiConfigState.DEFAULT_TIMER_PRESETS_SECONDS,
                 preferredReturnImeId = saved.preferredReturnImeId,
+                timerPillEnabled = saved.timerPillEnabled,
+                timerPillX = saved.timerPillX,
+                timerPillY = saved.timerPillY,
             )
         } else {
             AiConfigState()
@@ -594,12 +603,51 @@ class DefaultAiConfigRepository(
         }
     }
 
+    override fun recordRecentDirection(direction: String) {
+        val cleaned = direction.trim()
+        if (cleaned.isEmpty()) return
+        synchronized(lock) {
+            val current = _configState.value
+            val updated = (listOf(cleaned) + current.recentDirections.filterNot { it == cleaned })
+                .take(AiConfigState.MAX_RECENT_DIRECTIONS)
+            _configState.value = current.copy(recentDirections = updated)
+            persistLocked()
+        }
+    }
+
+    override fun clearRecentDirections() {
+        synchronized(lock) {
+            val current = _configState.value
+            if (current.recentDirections.isEmpty()) return
+            _configState.value = current.copy(recentDirections = emptyList())
+            persistLocked()
+        }
+    }
+
     override fun setPreferredReturnImeId(imeId: String?) {
         val normalized = imeId?.trim()?.takeIf { it.isNotEmpty() }
         synchronized(lock) {
             val current = _configState.value
             if (current.preferredReturnImeId == normalized) return
             _configState.value = current.copy(preferredReturnImeId = normalized)
+            persistLocked()
+        }
+    }
+
+    override fun setTimerPillEnabled(enabled: Boolean) {
+        synchronized(lock) {
+            val current = _configState.value
+            if (current.timerPillEnabled == enabled) return
+            _configState.value = current.copy(timerPillEnabled = enabled)
+            persistLocked()
+        }
+    }
+
+    override fun setTimerPillPosition(x: Int, y: Int) {
+        synchronized(lock) {
+            val current = _configState.value
+            if (current.timerPillX == x && current.timerPillY == y) return
+            _configState.value = current.copy(timerPillX = x, timerPillY = y)
             persistLocked()
         }
     }
@@ -619,8 +667,12 @@ class DefaultAiConfigRepository(
                 triggerWordEnabled = state.triggerWordEnabled,
                 snippets = state.snippets,
                 recentPrompts = state.recentPrompts,
+                recentDirections = state.recentDirections,
                 timerPresetsSeconds = state.timerPresetsSeconds,
                 preferredReturnImeId = state.preferredReturnImeId,
+                timerPillEnabled = state.timerPillEnabled,
+                timerPillX = state.timerPillX,
+                timerPillY = state.timerPillY,
             ),
         )
     }

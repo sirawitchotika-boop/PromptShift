@@ -116,6 +116,8 @@ fun PromptShiftHubScreen(
     onCopySnippet: (PromptSnippet) -> Unit,
     onCopyRecent: (String) -> Unit,
     onClearRecent: () -> Unit,
+    onClearRecentDirections: () -> Unit,
+    onToggleTimerPill: (Boolean) -> Unit,
     onStartTimer: (minutes: Int, seconds: Int) -> Unit,
     onStartTimerPreset: (totalSeconds: Int) -> Unit,
     onSaveTimerPreset: (minutes: Int, seconds: Int) -> Boolean,
@@ -224,6 +226,7 @@ fun PromptShiftHubScreen(
                 onSelectProviderModel = onSelectProviderModel,
                 onSelectInstruction = onSelectInstruction,
                 onSelectReasoningEffort = onSelectReasoningEffort,
+                onClearRecentDirections = onClearRecentDirections,
                 onAddProviderClick = {
                     editingProvider = null
                     showProviderDialog = true
@@ -271,6 +274,8 @@ fun PromptShiftHubScreen(
             CountdownTimerCard(
                 timerState = timerState,
                 presetsSeconds = aiConfig.timerPresetsSeconds,
+                timerPillEnabled = aiConfig.timerPillEnabled,
+                onToggleTimerPill = onToggleTimerPill,
                 onStartTimer = onStartTimer,
                 onStartPreset = onStartTimerPreset,
                 onSavePreset = onSaveTimerPreset,
@@ -751,6 +756,7 @@ private fun DirectAiGenerateCard(
     onSelectProviderModel: (providerId: String, modelId: String) -> Unit,
     onSelectInstruction: (String?) -> Unit,
     onSelectReasoningEffort: (ReasoningEffort) -> Unit,
+    onClearRecentDirections: () -> Unit,
     onAddProviderClick: () -> Unit,
     onStartGeneration: (String, Int, Boolean) -> StartGenerationResult,
     onCancelGeneration: () -> Unit,
@@ -909,6 +915,18 @@ private fun DirectAiGenerateCard(
                             )
                         }
                     }
+                }
+
+                if (aiConfig.recentDirections.isNotEmpty()) {
+                    RecentDirectionsHistoryBox(
+                        recentDirections = aiConfig.recentDirections,
+                        currentDraft = direction,
+                        onSelectDirection = { chosen ->
+                            direction = chosen
+                            inlineError = null
+                        },
+                        onClear = onClearRecentDirections,
+                    )
                 }
 
                 OutlinedTextField(

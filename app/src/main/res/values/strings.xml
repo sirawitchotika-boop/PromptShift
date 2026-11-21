@@ -17,4 +17,7 @@
     <string name="timer_running_title">PromptShift Timer</string>
     <string name="timer_running_body">Tap to open timer controls</string>
     <string name="timer_action_cancel">Cancel</string>
+    <string name="ai_stream_channel_name">AI Prompt Streaming</string>
+    <string name="ai_stream_channel_desc">Keeps AI prompt generation streaming reliably in the background.</string>
+    <string name="ai_stream_title">PromptShift AI Streaming</string>
 </resources>

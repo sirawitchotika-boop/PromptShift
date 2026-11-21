@@ -370,6 +370,8 @@ internal fun SnippetsAndRecentCard(
 internal fun CountdownTimerCard(
     timerState: TimerState,
     presetsSeconds: List<Int>,
+    timerPillEnabled: Boolean,
+    onToggleTimerPill: (Boolean) -> Unit,
     onStartTimer: (minutes: Int, seconds: Int) -> Unit,
     onStartPreset: (totalSeconds: Int) -> Unit,
     onSavePreset: (minutes: Int, seconds: Int) -> Boolean,
@@ -401,7 +403,8 @@ internal fun CountdownTimerCard(
                 text = when {
                     timerState.isRunning -> "RUNNING • ${timerState.formattedRemaining()}"
                     timerState.isFinished -> "DONE ⏱"
-                    else -> "Top-Left Pill + Alert"
+                    timerPillEnabled -> "Floating Pill + Alert"
+                    else -> "Notification + Alert"
                 },
                 color = when {
                     timerState.isRunning -> PromptShiftColors.CopiedEmerald
@@ -667,6 +670,43 @@ internal fun CountdownTimerCard(
                     fontWeight = FontWeight.SemiBold,
                 )
             }
+        }
+
+        Spacer(modifier = Modifier.height(10.dp))
+
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(10.dp))
+                .background(PromptShiftColors.ObsidianBg)
+                .border(1.dp, PromptShiftColors.MetalBorder.copy(alpha = 0.7f), RoundedCornerShape(10.dp))
+                .padding(horizontal = 12.dp, vertical = 6.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = "Floating Countdown Pill",
+                    color = PromptShiftColors.TextPrimary,
+                    fontSize = 12.5.sp,
+                    fontWeight = FontWeight.Bold,
+                )
+                Text(
+                    text = "Top-center & draggable (off = notification only)",
+                    color = PromptShiftColors.TextMuted,
+                    fontSize = 11.sp,
+                )
+            }
+            Switch(
+                checked = timerPillEnabled,
+                onCheckedChange = onToggleTimerPill,
+                colors = SwitchDefaults.colors(
+                    checkedThumbColor = PromptShiftColors.TextPrimary,
+                    checkedTrackColor = PromptShiftColors.CopiedEmerald,
+                    uncheckedThumbColor = PromptShiftColors.TextMuted,
+                    uncheckedTrackColor = PromptShiftColors.CarbonElevated,
+                ),
+            )
         }
     }
 }

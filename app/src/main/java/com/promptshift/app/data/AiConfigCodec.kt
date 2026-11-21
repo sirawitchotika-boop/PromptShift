@@ -18,8 +18,12 @@ data class PersistedAiConfig(
     val triggerWordEnabled: Boolean = false,
     val snippets: List<PromptSnippet> = emptyList(),
     val recentPrompts: List<String> = emptyList(),
+    val recentDirections: List<String> = emptyList(),
     val timerPresetsSeconds: List<Int>? = null,
     val preferredReturnImeId: String? = null,
+    val timerPillEnabled: Boolean = true,
+    val timerPillX: Int? = null,
+    val timerPillY: Int? = null,
 )
 
 data class SafeBackupFavoriteModels(
@@ -108,6 +112,11 @@ object AiConfigCodec {
             if (idx > 0) sb.append(',')
             appendJsonString(sb, recent)
         }
+        sb.append("],\"recentDirections\":[")
+        config.recentDirections.forEachIndexed { idx, dir ->
+            if (idx > 0) sb.append(',')
+            appendJsonString(sb, dir)
+        }
         sb.append("]")
         if (config.timerPresetsSeconds != null) {
             sb.append(",\"timerPresetsSeconds\":[")
@@ -119,6 +128,13 @@ object AiConfigCodec {
         }
         sb.append(",\"preferredReturnImeId\":")
         appendNullableString(sb, config.preferredReturnImeId)
+        sb.append(",\"timerPillEnabled\":").append(config.timerPillEnabled)
+        if (config.timerPillX != null) {
+            sb.append(",\"timerPillX\":").append(config.timerPillX)
+        }
+        if (config.timerPillY != null) {
+            sb.append(",\"timerPillY\":").append(config.timerPillY)
+        }
         sb.append('}')
         return sb.toString()
     }
@@ -198,6 +214,12 @@ object AiConfigCodec {
                 ?.take(10)
                 ?: emptyList()
 
+            val recentDirections = (root["recentDirections"] as? List<*>)
+                ?.mapNotNull { (it as? String)?.trim()?.takeIf { s -> s.isNotEmpty() } }
+                ?.distinct()
+                ?.take(8)
+                ?: emptyList()
+
             val timerPresetsSeconds = if (root.containsKey("timerPresetsSeconds")) {
                 (root["timerPresetsSeconds"] as? List<*>)
                     ?.mapNotNull { (it as? Number)?.toInt()?.takeIf { sec -> sec in 1..59_999 } }
@@ -212,6 +234,10 @@ object AiConfigCodec {
                 ?.trim()
                 ?.takeIf { it.isNotEmpty() }
 
+            val timerPillEnabled = (root["timerPillEnabled"] as? Boolean) ?: true
+            val timerPillX = (root["timerPillX"] as? Number)?.toInt()
+            val timerPillY = (root["timerPillY"] as? Number)?.toInt()
+
             PersistedAiConfig(
                 providers = providers,
                 activeProviderId = activeProviderId,
@@ -224,8 +250,12 @@ object AiConfigCodec {
                 triggerWordEnabled = triggerWordEnabled,
                 snippets = snippets,
                 recentPrompts = recentPrompts,
+                recentDirections = recentDirections,
                 timerPresetsSeconds = timerPresetsSeconds,
                 preferredReturnImeId = preferredReturnImeId,
+                timerPillEnabled = timerPillEnabled,
+                timerPillX = timerPillX,
+                timerPillY = timerPillY,
             )
         } catch (_: Exception) {
             null

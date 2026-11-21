@@ -152,4 +152,48 @@ class GenerationCoordinatorTest {
         assertEquals(listOf("Unlocked #1", "Unlocked #2"), batchRepo.batchState.value.prompts)
         assertTrue(batchRepo.batchState.value.isCurrentCopied)
     }
+
+    @Test
+    fun `startGeneration records recent direction and triggers foreground streaming callback`() = runTest {
+        val batchRepo = DefaultPromptBatchRepository(MemoryBatchPersistence())
+        val configRepo = DefaultAiConfigRepository(MemoryConfigPersistence(), MemoryKeyStore())
+        configRepo.saveProvider(null, "NanoGPT", "https://nano-gpt.com/api/v1", "glm-5.3", "sk-test")
+
+        var startedCallbacks = 0
+        val fakeClient = object : AiStreamingClient {
+            override suspend fun streamPrompts(
+                provider: ProviderProfile,
+                apiKey: String,
+                instruction: InstructionProfile?,
+                direction: String,
+                promptCount: Int,
+                reasoningEffort: ReasoningEffort,
+                activeTriggerWord: String?,
+                onPromptCompleted: (String) -> Unit,
+            ): Int {
+                onPromptCompleted("Prompt A")
+                return 1
+            }
+
+            override suspend fun testConnection(provider: ProviderProfile, apiKey: String) =
+                ConnectionTestResult.Success(10L, "OK")
+
+            override suspend fun fetchModels(baseUrl: String, apiKey: String) =
+                com.promptshift.app.domain.FetchModelsResult.Success(listOf("glm-5.3"))
+        }
+
+        val coordinator = GenerationCoordinator(
+            appScope = this,
+            batchRepository = batchRepo,
+            configRepository = configRepo,
+            streamingClient = fakeClient,
+            onStreamingStarted = { startedCallbacks++ },
+        )
+
+        val result = coordinator.startGeneration("cozy sunset ferry", 1, allowReplaceExisting = true)
+        assertEquals(StartGenerationResult.Started, result)
+        assertEquals(1, startedCallbacks)
+        assertEquals(listOf("cozy sunset ferry"), configRepo.configState.value.recentDirections)
+        advanceUntilIdle()
+    }
 }

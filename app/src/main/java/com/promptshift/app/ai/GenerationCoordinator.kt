@@ -22,6 +22,7 @@ class GenerationCoordinator(
     private val batchRepository: PromptBatchRepository,
     private val configRepository: AiConfigRepository,
     private val streamingClient: AiStreamingClient,
+    private val onStreamingStarted: () -> Unit = {},
 ) {
     private val _generationState = MutableStateFlow<GenerationState>(GenerationState.Idle)
     val generationState: StateFlow<GenerationState> = _generationState.asStateFlow()
@@ -55,6 +56,9 @@ class GenerationCoordinator(
 
         val safeCount = promptCount.coerceIn(1, 100)
         configRepository.setDefaultPromptCount(safeCount)
+        if (direction.isNotBlank()) {
+            configRepository.recordRecentDirection(direction)
+        }
 
         batchRepository.beginStreamingBatch()
         _generationState.value = GenerationState.Streaming(
@@ -63,6 +67,7 @@ class GenerationCoordinator(
             unlockedCount = 0,
         )
         batchRepository.postFeedback("Streaming 0/$safeCount...")
+        onStreamingStarted()
 
         activeJob = appScope.launch {
             var unlocked = 0
