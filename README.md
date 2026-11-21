@@ -1,4 +1,4 @@
-# PromptShift (`v2.2.0`)
+# PromptShift (`v2.3.0`)
 
 **PromptShift** is a lightweight native Android floating clipboard, direct-AI SSE streaming generator, and 1-tap auto-insert Mini-Keyboard built for high-volume multi-prompt workflows (`===PROMPT===`) without clipboard truncation or constant app-switching.
 
@@ -35,7 +35,7 @@
   - **Editable 1-Tap Presets:** Starts with `01:00`, `03:00`, `05:00`; save custom `Min/Sec` presets with `+ Save`, delete with `Edit`, and tap any preset for 1-tap start in both the Bubble popup and Hub card.
   - **Draggable Top-Center Floating Pill + Shade/Live Update Notification:** While a timer runs outside PromptShift, a compact `⏱ MM:SS` pill appears at top-center (clear of Back buttons), can be dragged anywhere with its position remembered, and can be toggled ON/OFF in the Hub (`Floating Countdown Pill`). A silent ongoing countdown notification (with Android 16+ Live Update promotion hint and 1-tap `Cancel`) also stays in the shade until finish or cancel.
   - **Completion Alert:** Vibrates in a ~4-second auto-stopping pulse pattern when time is up and posts a `PromptShift Timer Done` heads-up notification with 1-tap `Dismiss`.
-- **Safe JSON Backup (v2):** Export and import **Instruction Profiles + Saved Snippets + Trigger Word Chips + Favorite Model IDs** in a single JSON file — with **zero API keys or provider URLs** ever exported.
+- **Safe JSON Backup (v2):** Export and import **Instruction Profiles + Saved Snippets + Trigger Word Chips + Favorite Model IDs + Timer Presets** in a single JSON file — with **zero API keys or provider URLs** ever exported.
 
 ---
 
@@ -79,7 +79,7 @@ GitHub Actions (`.github/workflows/android-apk.yml`) runs on every push and pull
 
 | Version | Highlights |
 | :--- | :--- |
-| **`v2.2.0` (`main` updates)** | Editable 1-tap Timer presets (`+ Save` / `Edit`), draggable top-center floating countdown pill with Hub ON/OFF toggle + Live Update ongoing notification, Auto-Return Keyboard picker after Timer popup, scrollable Recent Directions history (last 8), and `AiGenerationForegroundService` for background streaming survival. |
+| **`v2.3.0` (`versionCode 6`)** | Editable 1-tap Timer presets (`+ Save` / `Edit`, included in Safe Backup v2), draggable top-center floating countdown pill with Hub ON/OFF toggle + Live Update ongoing notification, Auto-Return Keyboard picker after Timer popup, scrollable Recent Directions history (last 8), `AiGenerationForegroundService` for background streaming survival, and improved diagnostic warning logs. |
 | **`v2.2.0` (`versionCode 5`)** | Phase 4: Pinned Trigger Words, Saved Snippets & Recent 10, Favorite AI Models + `Fetch Models`, Reasoning Effort (`efforts`), Wide Instruction Editor + Expand/Collapse cards, `[⏱]` Countdown Timer, and Safe JSON Backup v2. |
 | **`v2.1.0` (`versionCode 4`)** | Phase 3: Banking-app-safe `PromptShiftImeService` Mini-Keyboard (`Replace` / `Append`, `Auto-Next`, WebView fallback, 1-tap `🌐` keyboard switch). |
 | **`v2.0.0` (`versionCode 3`)** | Phase 2: Direct OpenAI-compatible SSE streaming, Android Keystore API key encryption, Provider & Instruction Profiles, and Quick-Direction popup. |

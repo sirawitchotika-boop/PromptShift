@@ -11,6 +11,7 @@ import android.content.pm.ServiceInfo
 import android.os.Build
 import android.os.IBinder
 import android.os.PowerManager
+import android.util.Log
 import androidx.core.app.NotificationCompat
 import androidx.core.app.ServiceCompat
 import androidx.core.content.ContextCompat
@@ -85,7 +86,8 @@ class AiGenerationForegroundService : Service() {
             lock.setReferenceCounted(false)
             lock.acquire(WAKE_LOCK_TIMEOUT_MS)
             wakeLock = lock
-        } catch (_: Exception) {
+        } catch (e: Exception) {
+            Log.w(TAG, "Unable to acquire streaming WakeLock", e)
         }
     }
 
@@ -94,7 +96,8 @@ class AiGenerationForegroundService : Service() {
             wakeLock?.let { lock ->
                 if (lock.isHeld) lock.release()
             }
-        } catch (_: Exception) {
+        } catch (e: Exception) {
+            Log.w(TAG, "Unable to release streaming WakeLock", e)
         }
         wakeLock = null
     }
@@ -175,11 +178,13 @@ class AiGenerationForegroundService : Service() {
         try {
             val manager = getSystemService(Context.NOTIFICATION_SERVICE) as? NotificationManager ?: return
             manager.notify(NOTIFICATION_ID, buildNotification(state))
-        } catch (_: Exception) {
+        } catch (e: Exception) {
+            Log.w(TAG, "Unable to update AI streaming notification", e)
         }
     }
 
     companion object {
+        private const val TAG = "PromptShiftAiStreamSvc"
         private const val CHANNEL_ID = "promptshift_ai_stream_channel"
         private const val NOTIFICATION_ID = 1007
         private const val WAKE_LOCK_TIMEOUT_MS = 10 * 60 * 1000L
@@ -192,7 +197,8 @@ class AiGenerationForegroundService : Service() {
                     action = ACTION_START
                 }
                 ContextCompat.startForegroundService(context, intent)
-            } catch (_: Exception) {
+            } catch (e: Exception) {
+                Log.w(TAG, "Unable to start AiGenerationForegroundService", e)
             }
         }
     }

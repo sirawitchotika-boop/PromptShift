@@ -4,6 +4,7 @@ import android.content.Context
 import android.graphics.Color
 import android.inputmethodservice.InputMethodService
 import android.os.Build
+import android.util.Log
 import android.view.View
 import android.view.inputmethod.InputMethodManager
 import com.promptshift.app.PromptShiftApp
@@ -266,7 +267,8 @@ class PromptShiftImeService : InputMethodService() {
                 try {
                     switchInputMethod(targetId)
                     return true
-                } catch (_: Exception) {
+                } catch (e: Exception) {
+                    Log.w("PromptShiftIme", "Failed to switch to preferred IME $targetId; falling back", e)
                 }
             }
         }

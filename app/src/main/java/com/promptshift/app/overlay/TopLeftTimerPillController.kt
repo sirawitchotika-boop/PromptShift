@@ -8,6 +8,7 @@ import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
 import android.os.Build
 import android.provider.Settings
+import android.util.Log
 import android.util.TypedValue
 import android.view.Gravity
 import android.view.MotionEvent
@@ -149,7 +150,8 @@ class TopLeftTimerPillController(
                             lp.y = (startY + dy).coerceIn(0, maxY)
                             try {
                                 wm.updateViewLayout(v, lp)
-                            } catch (_: Exception) {
+                            } catch (e: Exception) {
+                                Log.w(TAG, "Unable to update timer pill layout", e)
                             }
                         }
                         true
@@ -177,7 +179,8 @@ class TopLeftTimerPillController(
             pillView = view
             layoutParams = params
             isAttached = true
-        } catch (_: Exception) {
+        } catch (e: Exception) {
+            Log.w(TAG, "Unable to attach floating timer pill", e)
             pillView = null
             layoutParams = null
             isAttached = false
@@ -231,4 +234,8 @@ class TopLeftTimerPillController(
             value.toFloat(),
             context.resources.displayMetrics,
         ).toInt()
+
+    companion object {
+        private const val TAG = "PromptShiftTimerPill"
+    }
 }

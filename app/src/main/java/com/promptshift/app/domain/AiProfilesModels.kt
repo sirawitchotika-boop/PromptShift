@@ -128,6 +128,7 @@ sealed interface SafeBackupImportResult {
         val snippetsCount: Int,
         val triggerWordsCount: Int,
         val favoriteModelsCount: Int,
+        val timerPresetsCount: Int = 0,
     ) : SafeBackupImportResult {
         fun summaryLabel(): String {
             val parts = buildList {
@@ -135,6 +136,7 @@ sealed interface SafeBackupImportResult {
                 if (snippetsCount > 0) add("$snippetsCount snippet${if (snippetsCount == 1) "" else "s"}")
                 if (triggerWordsCount > 0) add("$triggerWordsCount trigger${if (triggerWordsCount == 1) "" else "s"}")
                 if (favoriteModelsCount > 0) add("$favoriteModelsCount fav model${if (favoriteModelsCount == 1) "" else "s"}")
+                if (timerPresetsCount > 0) add("$timerPresetsCount timer preset${if (timerPresetsCount == 1) "" else "s"}")
             }
             return if (parts.isEmpty()) "Backup imported" else "Imported " + parts.joinToString(", ")
         }

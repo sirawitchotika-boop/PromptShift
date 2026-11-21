@@ -511,6 +511,7 @@ class DefaultAiConfigRepository(
                 snippets = state.snippets,
                 triggerWords = state.triggerWords,
                 favoriteModels = favEntries,
+                timerPresetsSeconds = state.timerPresetsSeconds,
             ),
         )
     }
@@ -522,9 +523,10 @@ class DefaultAiConfigRepository(
         val hasAny = payload.instructions.isNotEmpty() ||
             payload.snippets.isNotEmpty() ||
             payload.triggerWords.isNotEmpty() ||
-            payload.favoriteModels.isNotEmpty()
+            payload.favoriteModels.isNotEmpty() ||
+            payload.timerPresetsSeconds.isNotEmpty()
         if (!hasAny) {
-            return SafeBackupImportResult.Failed("No profiles, snippets, triggers, or favorite models found")
+            return SafeBackupImportResult.Failed("No profiles, snippets, triggers, favorite models, or timer presets found")
         }
 
         var mergedFavCount = 0
@@ -540,6 +542,11 @@ class DefaultAiConfigRepository(
             payload.snippets.forEach { mergedSnippets[it.id] = it }
 
             val mergedTriggers = (current.triggerWords + payload.triggerWords).distinct()
+            val mergedTimerPresets = if (payload.timerPresetsSeconds.isNotEmpty()) {
+                (current.timerPresetsSeconds + payload.timerPresetsSeconds).distinct().sorted()
+            } else {
+                current.timerPresetsSeconds
+            }
 
             val updatedProviders = current.providers.map { provider ->
                 val matched = payload.favoriteModels.filter { entry ->
@@ -562,6 +569,7 @@ class DefaultAiConfigRepository(
                 instructions = mergedInstructions.values.toList(),
                 snippets = mergedSnippets.values.toList(),
                 triggerWords = mergedTriggers,
+                timerPresetsSeconds = mergedTimerPresets,
             )
             persistLocked()
         }
@@ -571,6 +579,7 @@ class DefaultAiConfigRepository(
             snippetsCount = payload.snippets.size,
             triggerWordsCount = payload.triggerWords.size,
             favoriteModelsCount = mergedFavCount,
+            timerPresetsCount = payload.timerPresetsSeconds.size,
         )
     }
 

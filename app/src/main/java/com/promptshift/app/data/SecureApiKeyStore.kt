@@ -4,6 +4,7 @@ import android.content.Context
 import android.security.keystore.KeyGenParameterSpec
 import android.security.keystore.KeyProperties
 import android.util.Base64
+import android.util.Log
 import java.security.KeyStore
 import javax.crypto.Cipher
 import javax.crypto.KeyGenerator
@@ -58,7 +59,8 @@ class AndroidKeystoreApiKeyStore(context: Context) : ApiKeyStore {
             val cipher = Cipher.getInstance(TRANSFORMATION)
             cipher.init(Cipher.DECRYPT_MODE, getOrCreateMasterKey(), GCMParameterSpec(GCM_TAG_BITS, iv))
             String(cipher.doFinal(ciphertext), Charsets.UTF_8)
-        } catch (_: Exception) {
+        } catch (e: Exception) {
+            Log.w(TAG, "Failed to decrypt API key for profile=$profileId", e)
             null
         }
     }
@@ -91,6 +93,7 @@ class AndroidKeystoreApiKeyStore(context: Context) : ApiKeyStore {
     private fun keyFor(profileId: String): String = "enc_api_key_$profileId"
 
     companion object {
+        private const val TAG = "PromptShiftKeyStore"
         private const val ANDROID_KEYSTORE = "AndroidKeyStore"
         private const val KEY_ALIAS = "promptshift_api_key_master_v1"
         private const val TRANSFORMATION = "AES/GCM/NoPadding"
