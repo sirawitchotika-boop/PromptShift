@@ -13,8 +13,6 @@ import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.ExperimentalLayoutApi
-import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -123,7 +121,6 @@ class TimerPopupActivity : ComponentActivity() {
     }
 }
 
-@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun TimerPopupContent(
     timerState: TimerState,
@@ -141,7 +138,6 @@ private fun TimerPopupContent(
     var secondsInput by remember { mutableStateOf("") }
     var statusMessage by remember { mutableStateOf<String?>(null) }
     var statusIsError by remember { mutableStateOf(false) }
-    var isEditingPresets by remember { mutableStateOf(false) }
 
     Box(
         modifier = Modifier
@@ -280,86 +276,14 @@ private fun TimerPopupContent(
                         }
                     }
 
-                    // Quick 1-tap Presets section
-                    Column(
-                        modifier = Modifier.fillMaxWidth(),
-                        verticalArrangement = Arrangement.spacedBy(8.dp),
-                    ) {
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically,
-                        ) {
-                            Text(
-                                text = if (isEditingPresets) "TAP PRESET TO REMOVE" else "QUICK PRESETS (1-TAP START)",
-                                color = if (isEditingPresets) PromptShiftColors.QuotaWarnRed else PromptShiftColors.TextMuted,
-                                fontSize = 11.sp,
-                                fontWeight = FontWeight.Bold,
-                                letterSpacing = 0.8.sp,
-                            )
-                            if (presetsSeconds.isNotEmpty()) {
-                                Text(
-                                    text = if (isEditingPresets) "Done" else "Edit",
-                                    color = if (isEditingPresets) PromptShiftColors.CopiedEmerald else PromptShiftColors.TextMuted,
-                                    fontSize = 11.5.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    modifier = Modifier
-                                        .clip(RoundedCornerShape(8.dp))
-                                        .background(PromptShiftColors.CarbonElevated)
-                                        .clickable { isEditingPresets = !isEditingPresets }
-                                        .padding(horizontal = 9.dp, vertical = 4.dp),
-                                )
-                            }
-                        }
-
-                        if (presetsSeconds.isEmpty()) {
-                            Text(
-                                text = "No saved presets yet — enter Min/Sec below and tap + Save.",
-                                color = PromptShiftColors.TextMuted,
-                                fontSize = 11.5.sp,
-                            )
-                        } else {
-                            FlowRow(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                                verticalArrangement = Arrangement.spacedBy(8.dp),
-                            ) {
-                                presetsSeconds.forEach { totalSec ->
-                                    val label = TimerState.formatPresetLabel(totalSec)
-                                    val borderColor = if (isEditingPresets) {
-                                        PromptShiftColors.QuotaWarnRed.copy(alpha = 0.75f)
-                                    } else {
-                                        PromptShiftColors.MetalBorder
-                                    }
-                                    Box(
-                                        modifier = Modifier
-                                            .clip(RoundedCornerShape(10.dp))
-                                            .background(PromptShiftColors.CarbonElevated)
-                                            .border(1.dp, borderColor, RoundedCornerShape(10.dp))
-                                            .clickable {
-                                                if (isEditingPresets) {
-                                                    onRemovePreset(totalSec)
-                                                    if (presetsSeconds.size <= 1) {
-                                                        isEditingPresets = false
-                                                    }
-                                                } else {
-                                                    onStartPreset(totalSec)
-                                                }
-                                            }
-                                            .padding(horizontal = 12.dp, vertical = 8.dp),
-                                    ) {
-                                        Text(
-                                            text = if (isEditingPresets) "$label  ✕" else label,
-                                            color = if (isEditingPresets) PromptShiftColors.QuotaWarnRed else PromptShiftColors.TextPrimary,
-                                            fontFamily = FontFamily.Monospace,
-                                            fontSize = 13.5.sp,
-                                            fontWeight = FontWeight.Bold,
-                                        )
-                                    }
-                                }
-                            }
-                        }
-                    }
+                    TimerPresetsSection(
+                        presetsSeconds = presetsSeconds,
+                        onStartPreset = onStartPreset,
+                        onRemovePreset = onRemovePreset,
+                        headerTitle = "QUICK PRESETS (1-TAP START)",
+                        emptyText = "No saved presets yet — enter Min/Sec below and tap + Save.",
+                        compact = false,
+                    )
 
                     Row(
                         modifier = Modifier.fillMaxWidth(),
