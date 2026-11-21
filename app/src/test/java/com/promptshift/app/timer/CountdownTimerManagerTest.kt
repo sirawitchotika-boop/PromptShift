@@ -120,4 +120,39 @@ class CountdownTimerManagerTest {
         assertEquals(0L, manager.state.value.targetEndMs)
         assertEquals(1, cancelCount)
     }
+
+    @Test
+    fun `onAlarmExpired completes paused Doze timer exactly once and prevents duplicate finish`() = runTest {
+        var fakeNow = 10_000L
+        var finishCount = 0
+
+        val manager = CountdownTimerManager(
+            appScope = backgroundScope,
+            clockMs = { fakeNow },
+            tickIntervalMs = 250L,
+            onTimerFinished = { finishCount++ },
+        )
+
+        assertTrue(manager.startTotalSeconds(60))
+        runCurrent()
+
+        // Premature alarm wakeup before targetEndMs does not finish early
+        fakeNow = 40_000L
+        assertFalse(manager.onAlarmExpired())
+        assertTrue(manager.state.value.isRunning)
+        assertEquals(0, finishCount)
+
+        // Simulate Android Doze pausing coroutine delay until wall clock passes targetEndMs (70_000L)
+        fakeNow = 70_000L
+        assertTrue(manager.onAlarmExpired())
+        assertFalse(manager.state.value.isRunning)
+        assertTrue(manager.state.value.isFinished)
+        assertEquals(1, finishCount)
+
+        // Subsequent coroutine wake-up or duplicate alarm must NOT double-fire
+        advanceTimeBy(5_000L)
+        runCurrent()
+        assertFalse(manager.onAlarmExpired())
+        assertEquals(1, finishCount)
+    }
 }

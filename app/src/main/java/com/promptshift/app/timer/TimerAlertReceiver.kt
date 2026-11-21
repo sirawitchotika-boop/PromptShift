@@ -20,9 +20,26 @@ class TimerAlertReceiver : BroadcastReceiver() {
             }
             TimerAlertNotifier.ACTION_CANCEL_RUNNING_TIMER -> {
                 TimerAlertNotifier.cancelRunningNotification(context)
+                TimerAlarmScheduler.cancelWakeup(context)
                 try {
                     PromptShiftApp.from(context).timerManager.cancel()
                 } catch (_: Exception) {
+                }
+            }
+            TimerAlarmScheduler.ACTION_TIMER_EXPIRED -> {
+                val targetEndMs = intent.getLongExtra(TimerAlarmScheduler.EXTRA_TARGET_END_MS, 0L)
+                try {
+                    val timerManager = PromptShiftApp.from(context).timerManager
+                    val before = timerManager.state.value
+                    val handled = timerManager.onAlarmExpired()
+                    if (!handled && !before.isRunning && !before.isFinished && targetEndMs > 0L) {
+                        // Process was killed under Doze and cold-started by AlarmManager.
+                        TimerAlertNotifier.triggerTimerDoneAlert(context)
+                    }
+                } catch (_: Exception) {
+                    if (targetEndMs > 0L) {
+                        TimerAlertNotifier.triggerTimerDoneAlert(context)
+                    }
                 }
             }
         }

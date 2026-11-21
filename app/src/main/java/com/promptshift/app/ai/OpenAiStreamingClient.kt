@@ -245,7 +245,7 @@ class HttpOpenAiStreamingClient : AiStreamingClient {
 
     companion object {
         private const val CONNECT_TIMEOUT_MS = 15_000
-        private const val STREAM_READ_TIMEOUT_MS = 60_000
+        internal const val STREAM_READ_TIMEOUT_MS = 240_000
         private const val TEST_READ_TIMEOUT_MS = 20_000
 
         internal fun formatHttpError(statusCode: Int, errorBody: String): String {
