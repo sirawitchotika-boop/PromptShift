@@ -8,8 +8,6 @@ import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.ExperimentalLayoutApi
-import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -365,7 +363,6 @@ internal fun SnippetsAndRecentCard(
     }
 }
 
-@OptIn(ExperimentalLayoutApi::class)
 @Composable
 internal fun CountdownTimerCard(
     timerState: TimerState,
@@ -384,7 +381,6 @@ internal fun CountdownTimerCard(
     var secondsInput by remember { mutableStateOf("") }
     var inlineMessage by remember { mutableStateOf<String?>(null) }
     var inlineIsError by remember { mutableStateOf(false) }
-    var isEditingPresets by remember { mutableStateOf(false) }
 
     CarbonCard {
         Row(
@@ -494,76 +490,14 @@ internal fun CountdownTimerCard(
                 Spacer(modifier = Modifier.height(10.dp))
             }
 
-            // Editable 1-tap Presets
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Text(
-                    text = if (isEditingPresets) "TAP PRESET TO REMOVE" else "PRESETS (1-TAP START)",
-                    color = if (isEditingPresets) PromptShiftColors.QuotaWarnRed else PromptShiftColors.TextMuted,
-                    fontSize = 10.5.sp,
-                    fontWeight = FontWeight.Bold,
-                    letterSpacing = 0.7.sp,
-                )
-                if (presetsSeconds.isNotEmpty()) {
-                    MiniActionChip(
-                        label = if (isEditingPresets) "Done" else "Edit",
-                        onClick = { isEditingPresets = !isEditingPresets },
-                    )
-                }
-            }
-
-            Spacer(modifier = Modifier.height(8.dp))
-
-            if (presetsSeconds.isEmpty()) {
-                Text(
-                    text = "No presets saved yet — enter Min/Sec below and tap + Save.",
-                    color = PromptShiftColors.TextMuted,
-                    fontSize = 11.5.sp,
-                )
-            } else {
-                FlowRow(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    verticalArrangement = Arrangement.spacedBy(8.dp),
-                ) {
-                    presetsSeconds.forEach { totalSec ->
-                        val label = TimerState.formatPresetLabel(totalSec)
-                        val borderColor = if (isEditingPresets) {
-                            PromptShiftColors.QuotaWarnRed.copy(alpha = 0.75f)
-                        } else {
-                            PromptShiftColors.MetalBorder
-                        }
-                        Box(
-                            modifier = Modifier
-                                .clip(RoundedCornerShape(10.dp))
-                                .background(PromptShiftColors.CarbonElevated)
-                                .border(1.dp, borderColor, RoundedCornerShape(10.dp))
-                                .clickable {
-                                    if (isEditingPresets) {
-                                        onRemovePreset(totalSec)
-                                        if (presetsSeconds.size <= 1) {
-                                            isEditingPresets = false
-                                        }
-                                    } else {
-                                        onStartPreset(totalSec)
-                                    }
-                                }
-                                .padding(horizontal = 11.dp, vertical = 7.dp),
-                        ) {
-                            Text(
-                                text = if (isEditingPresets) "$label  ✕" else label,
-                                color = if (isEditingPresets) PromptShiftColors.QuotaWarnRed else PromptShiftColors.TextPrimary,
-                                fontFamily = FontFamily.Monospace,
-                                fontSize = 12.5.sp,
-                                fontWeight = FontWeight.Bold,
-                            )
-                        }
-                    }
-                }
-            }
+            TimerPresetsSection(
+                presetsSeconds = presetsSeconds,
+                onStartPreset = onStartPreset,
+                onRemovePreset = onRemovePreset,
+                headerTitle = "PRESETS (1-TAP START)",
+                emptyText = "No presets saved yet — enter Min/Sec below and tap + Save.",
+                compact = true,
+            )
 
             Spacer(modifier = Modifier.height(10.dp))
 

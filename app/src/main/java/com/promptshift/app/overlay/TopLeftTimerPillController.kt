@@ -35,6 +35,9 @@ class TopLeftTimerPillController(
     private var pillView: TextView? = null
     private var layoutParams: WindowManager.LayoutParams? = null
     private var isAttached: Boolean = false
+    private var lastRenderedText: String? = null
+    private var lastScreenWidth: Int = 0
+    private var lastScreenHeight: Int = 0
 
     fun update(
         timerState: TimerState,
@@ -49,8 +52,30 @@ class TopLeftTimerPillController(
 
         if (!isAttached) {
             attach(savedX = savedX, savedY = savedY)
+        } else {
+            val wm = windowManager
+            if (wm != null) {
+                val currentWidth = resolveScreenWidthPx(wm)
+                val currentHeight = resolveScreenHeightPx(wm)
+                if (currentWidth != lastScreenWidth || currentHeight != lastScreenHeight) {
+                    reclampToScreenBounds()
+                }
+            }
         }
-        pillView?.text = "⏱ ${timerState.formattedRemaining()}"
+
+        val nextText = formatPillText(timerState.formattedRemaining())
+        if (nextText != lastRenderedText) {
+            pillView?.text = nextText
+            lastRenderedText = nextText
+        }
+    }
+
+    fun onConfigurationChanged() {
+        val view = pillView ?: return
+        if (!isAttached) return
+        view.post {
+            reclampToScreenBounds()
+        }
     }
 
     fun detach() {
@@ -68,6 +93,39 @@ class TopLeftTimerPillController(
         isAttached = false
         pillView = null
         layoutParams = null
+        lastRenderedText = null
+        lastScreenWidth = 0
+        lastScreenHeight = 0
+    }
+
+    private fun reclampToScreenBounds() {
+        val wm = windowManager ?: return
+        val view = pillView ?: return
+        val lp = layoutParams ?: return
+        if (!isAttached) return
+
+        val screenWidth = resolveScreenWidthPx(wm)
+        val screenHeight = resolveScreenHeightPx(wm)
+        lastScreenWidth = screenWidth
+        lastScreenHeight = screenHeight
+
+        val (clampedX, clampedY) = clampPosition(
+            x = lp.x,
+            y = lp.y,
+            screenWidth = screenWidth,
+            screenHeight = screenHeight,
+            pillWidth = view.width.coerceAtLeast(dp(60)),
+            pillHeight = view.height.coerceAtLeast(dp(36)),
+        )
+        if (clampedX != lp.x || clampedY != lp.y) {
+            lp.x = clampedX
+            lp.y = clampedY
+            try {
+                wm.updateViewLayout(view, lp)
+            } catch (e: Exception) {
+                Log.w(TAG, "Unable to re-clamp timer pill after rotation", e)
+            }
+        }
     }
 
     @SuppressLint("ClickableViewAccessibility")
@@ -82,8 +140,14 @@ class TopLeftTimerPillController(
         val defaultX = ((screenWidth - estimatedPillWidth) / 2).coerceAtLeast(dp(8))
         val defaultY = topInset + dp(4)
 
-        val initialX = (savedX ?: defaultX).coerceIn(0, (screenWidth - dp(60)).coerceAtLeast(0))
-        val initialY = (savedY ?: defaultY).coerceIn(0, (screenHeight - dp(40)).coerceAtLeast(0))
+        val (initialX, initialY) = clampPosition(
+            x = savedX ?: defaultX,
+            y = savedY ?: defaultY,
+            screenWidth = screenWidth,
+            screenHeight = screenHeight,
+            pillWidth = dp(60),
+            pillHeight = dp(40),
+        )
 
         val params = WindowManager.LayoutParams(
             WindowManager.LayoutParams.WRAP_CONTENT,
@@ -110,8 +174,9 @@ class TopLeftTimerPillController(
         var startY = 0
         var isDragging = false
 
+        val initialText = formatPillText("00:00")
         val view = TextView(context).apply {
-            text = "⏱ 00:00"
+            text = initialText
             setTextColor(Color.parseColor("#34D399"))
             setTextSize(TypedValue.COMPLEX_UNIT_SP, 12.5f)
             typeface = Typeface.create(Typeface.MONOSPACE, Typeface.BOLD)
@@ -144,10 +209,20 @@ class TopLeftTimerPillController(
                             isDragging = true
                         }
                         if (isDragging) {
-                            val maxX = (resolveScreenWidthPx(wm) - v.width.coerceAtLeast(dp(60))).coerceAtLeast(0)
-                            val maxY = (resolveScreenHeightPx(wm) - v.height.coerceAtLeast(dp(36))).coerceAtLeast(0)
-                            lp.x = (startX + dx).coerceIn(0, maxX)
-                            lp.y = (startY + dy).coerceIn(0, maxY)
+                            val currentWidth = resolveScreenWidthPx(wm)
+                            val currentHeight = resolveScreenHeightPx(wm)
+                            lastScreenWidth = currentWidth
+                            lastScreenHeight = currentHeight
+                            val (clampedX, clampedY) = clampPosition(
+                                x = startX + dx,
+                                y = startY + dy,
+                                screenWidth = currentWidth,
+                                screenHeight = currentHeight,
+                                pillWidth = v.width.coerceAtLeast(dp(60)),
+                                pillHeight = v.height.coerceAtLeast(dp(36)),
+                            )
+                            lp.x = clampedX
+                            lp.y = clampedY
                             try {
                                 wm.updateViewLayout(v, lp)
                             } catch (e: Exception) {
@@ -179,11 +254,17 @@ class TopLeftTimerPillController(
             pillView = view
             layoutParams = params
             isAttached = true
+            lastRenderedText = initialText
+            lastScreenWidth = screenWidth
+            lastScreenHeight = screenHeight
         } catch (e: Exception) {
             Log.w(TAG, "Unable to attach floating timer pill", e)
             pillView = null
             layoutParams = null
             isAttached = false
+            lastRenderedText = null
+            lastScreenWidth = 0
+            lastScreenHeight = 0
         }
     }
 
@@ -237,5 +318,21 @@ class TopLeftTimerPillController(
 
     companion object {
         private const val TAG = "PromptShiftTimerPill"
+
+        internal fun formatPillText(formattedRemaining: String): String =
+            "⏱ $formattedRemaining"
+
+        internal fun clampPosition(
+            x: Int,
+            y: Int,
+            screenWidth: Int,
+            screenHeight: Int,
+            pillWidth: Int,
+            pillHeight: Int,
+        ): Pair<Int, Int> {
+            val maxX = (screenWidth - pillWidth).coerceAtLeast(0)
+            val maxY = (screenHeight - pillHeight).coerceAtLeast(0)
+            return x.coerceIn(0, maxX) to y.coerceIn(0, maxY)
+        }
     }
 }

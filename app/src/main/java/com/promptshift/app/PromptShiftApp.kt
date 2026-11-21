@@ -3,6 +3,7 @@ package com.promptshift.app
 import android.app.Activity
 import android.app.Application
 import android.content.Context
+import android.content.res.Configuration
 import android.os.Bundle
 import com.promptshift.app.ai.AiGenerationForegroundService
 import com.promptshift.app.ai.GenerationCoordinator
@@ -138,6 +139,11 @@ class PromptShiftApp : Application() {
                 )
             }
         }
+    }
+
+    override fun onConfigurationChanged(newConfig: Configuration) {
+        super.onConfigurationChanged(newConfig)
+        topLeftTimerPillController?.onConfigurationChanged()
     }
 
     fun setOverlayRunning(running: Boolean) {
