@@ -215,4 +215,52 @@ class AiConfigRepositoryTest {
             v1Res,
         )
     }
+
+    @Test
+    fun `timer presets start with editable defaults and persist additions, deletions, and empty state`() {
+        val file = File(tempFolder.root, "timer_presets.json")
+        val repo = DefaultAiConfigRepository(FileAiConfigPersistence(file), InMemoryApiKeyStore())
+
+        // Starts with editable starter presets (1m, 3m, 5m)
+        assertEquals(listOf(60, 180, 300), repo.configState.value.timerPresetsSeconds)
+
+        // Rejects zero duration and duplicates
+        assertFalse(repo.addTimerPreset(0, 0))
+        assertFalse(repo.addTimerPreset(1, 0))
+
+        // Adds new presets sorted ascending
+        assertTrue(repo.addTimerPreset(0, 30))
+        assertTrue(repo.addTimerPreset(10, 0))
+        assertEquals(listOf(30, 60, 180, 300, 600), repo.configState.value.timerPresetsSeconds)
+
+        // Persists across reload
+        val reloaded = DefaultAiConfigRepository(FileAiConfigPersistence(file), InMemoryApiKeyStore())
+        assertEquals(listOf(30, 60, 180, 300, 600), reloaded.configState.value.timerPresetsSeconds)
+
+        // Removing all presets persists an intentionally empty list (does not snap back to defaults)
+        listOf(30, 60, 180, 300, 600).forEach { reloaded.removeTimerPreset(it) }
+        assertEquals(emptyList<Int>(), reloaded.configState.value.timerPresetsSeconds)
+
+        val reloadedEmpty = DefaultAiConfigRepository(FileAiConfigPersistence(file), InMemoryApiKeyStore())
+        assertEquals(emptyList<Int>(), reloadedEmpty.configState.value.timerPresetsSeconds)
+    }
+
+    @Test
+    fun `preferredReturnImeId persists and clears cleanly across reload`() {
+        val file = File(tempFolder.root, "return_ime.json")
+        val repo = DefaultAiConfigRepository(FileAiConfigPersistence(file), InMemoryApiKeyStore())
+
+        assertEquals(null, repo.configState.value.preferredReturnImeId)
+
+        val gboardId = "com.google.android.inputmethod.latin/com.android.inputmethod.latin.LatinIME"
+        repo.setPreferredReturnImeId(gboardId)
+        assertEquals(gboardId, repo.configState.value.preferredReturnImeId)
+
+        val reloaded = DefaultAiConfigRepository(FileAiConfigPersistence(file), InMemoryApiKeyStore())
+        assertEquals(gboardId, reloaded.configState.value.preferredReturnImeId)
+
+        reloaded.setPreferredReturnImeId(null)
+        val reloadedCleared = DefaultAiConfigRepository(FileAiConfigPersistence(file), InMemoryApiKeyStore())
+        assertEquals(null, reloadedCleared.configState.value.preferredReturnImeId)
+    }
 }

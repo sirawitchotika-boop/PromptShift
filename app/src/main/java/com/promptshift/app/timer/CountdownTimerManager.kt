@@ -14,6 +14,7 @@ data class TimerState(
     val totalDurationMs: Long = 0L,
     val remainingMs: Long = 0L,
     val isFinished: Boolean = false,
+    val targetEndMs: Long = 0L,
 ) {
     fun formattedRemaining(): String = formatMmSs(remainingMs)
 
@@ -31,6 +32,9 @@ data class TimerState(
             val seconds = totalSeconds % 60L
             return "%02d:%02d".format(minutes, seconds)
         }
+
+        fun formatPresetLabel(totalSeconds: Int): String =
+            formatMmSs(totalSeconds.coerceAtLeast(0) * 1000L)
     }
 }
 
@@ -42,6 +46,8 @@ class CountdownTimerManager(
     private val appScope: CoroutineScope,
     private val clockMs: () -> Long = { System.currentTimeMillis() },
     private val tickIntervalMs: Long = 250L,
+    private val onTimerStarted: (targetEndMs: Long) -> Unit = {},
+    private val onTimerCancelled: () -> Unit = {},
     private val onTimerFinished: () -> Unit = {},
     private val onAlertDismissed: () -> Unit = {},
 ) {
@@ -58,6 +64,11 @@ class CountdownTimerManager(
         return startDurationMs(durationMs)
     }
 
+    fun startTotalSeconds(totalSeconds: Int): Boolean {
+        val safeSec = totalSeconds.coerceIn(0, 999 * 60 + 59)
+        return startDurationMs(safeSec * 1000L)
+    }
+
     fun startDurationMs(durationMs: Long): Boolean {
         if (durationMs <= 0L) return false
         tickJob?.cancel()
@@ -70,7 +81,9 @@ class CountdownTimerManager(
             totalDurationMs = durationMs,
             remainingMs = durationMs,
             isFinished = false,
+            targetEndMs = targetEndMs,
         )
+        onTimerStarted(targetEndMs)
 
         tickJob = appScope.launch {
             while (isActive) {
@@ -81,6 +94,7 @@ class CountdownTimerManager(
                         totalDurationMs = durationMs,
                         remainingMs = 0L,
                         isFinished = true,
+                        targetEndMs = 0L,
                     )
                     onTimerFinished()
                     break
@@ -89,6 +103,7 @@ class CountdownTimerManager(
                         isRunning = true,
                         remainingMs = remaining,
                         isFinished = false,
+                        targetEndMs = targetEndMs,
                     )
                 }
                 delay(tickIntervalMs)
@@ -101,11 +116,13 @@ class CountdownTimerManager(
         tickJob?.cancel()
         tickJob = null
         onAlertDismissed()
+        onTimerCancelled()
         _state.value = TimerState(
             isRunning = false,
             totalDurationMs = lastConfiguredDurationMs,
             remainingMs = 0L,
             isFinished = false,
+            targetEndMs = 0L,
         )
     }
 

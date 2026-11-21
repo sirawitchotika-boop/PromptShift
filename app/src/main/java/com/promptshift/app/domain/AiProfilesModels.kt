@@ -59,6 +59,8 @@ data class AiConfigState(
     val triggerWordEnabled: Boolean = false,
     val snippets: List<PromptSnippet> = emptyList(),
     val recentPrompts: List<String> = emptyList(),
+    val timerPresetsSeconds: List<Int> = DEFAULT_TIMER_PRESETS_SECONDS,
+    val preferredReturnImeId: String? = null,
 ) {
     val activeProvider: ProviderProfile?
         get() = providers.firstOrNull { it.id == activeProviderId } ?: providers.firstOrNull()
@@ -68,6 +70,11 @@ data class AiConfigState(
 
     val effectiveTriggerWord: String?
         get() = if (triggerWordEnabled) PromptTextComposer.normalizeTriggerWord(activeTriggerWord) else null
+
+    companion object {
+        val DEFAULT_TIMER_PRESETS_SECONDS: List<Int> = listOf(60, 180, 300)
+        const val MAX_TIMER_PRESET_SECONDS: Int = 999 * 60 + 59
+    }
 }
 
 sealed interface GenerationState {

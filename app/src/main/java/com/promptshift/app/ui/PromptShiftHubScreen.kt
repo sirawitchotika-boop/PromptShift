@@ -74,6 +74,7 @@ fun PromptShiftHubScreen(
     timerState: TimerState,
     isOverlayRunning: Boolean,
     readiness: RealmeReadinessState,
+    enabledKeyboards: List<EnabledKeyboardOption>,
     statusBanner: String?,
     statusBannerIsError: Boolean,
     testingProviderId: String?,
@@ -83,6 +84,7 @@ fun PromptShiftHubScreen(
     onOpenBatterySettings: () -> Unit,
     onOpenKeyboardSettings: () -> Unit,
     onSwitchKeyboard: () -> Unit,
+    onSelectPreferredReturnIme: (String?) -> Unit,
     onLoadFromClipboard: () -> Unit,
     onClearBatch: () -> Unit,
     onSaveCurrentSlotAsSnippet: () -> Unit,
@@ -115,6 +117,9 @@ fun PromptShiftHubScreen(
     onCopyRecent: (String) -> Unit,
     onClearRecent: () -> Unit,
     onStartTimer: (minutes: Int, seconds: Int) -> Unit,
+    onStartTimerPreset: (totalSeconds: Int) -> Unit,
+    onSaveTimerPreset: (minutes: Int, seconds: Int) -> Boolean,
+    onRemoveTimerPreset: (totalSeconds: Int) -> Unit,
     onCancelTimer: () -> Unit,
     onResetTimer: () -> Unit,
     onDismissTimerAlert: () -> Unit,
@@ -130,6 +135,7 @@ fun PromptShiftHubScreen(
     var editingInstruction by remember { mutableStateOf<InstructionProfile?>(null) }
     var showSnippetDialog by remember { mutableStateOf(false) }
     var editingSnippet by remember { mutableStateOf<PromptSnippet?>(null) }
+    var showReturnKeyboardDialog by remember { mutableStateOf(false) }
 
     LaunchedEffect(awaitingClearConfirm) {
         if (awaitingClearConfirm) {
@@ -181,12 +187,23 @@ fun PromptShiftHubScreen(
             )
 
             // 3. Realme Readiness Strip
+            val preferredReturnKeyboardLabel = remember(aiConfig.preferredReturnImeId, enabledKeyboards) {
+                val savedId = aiConfig.preferredReturnImeId
+                when {
+                    savedId.isNullOrBlank() -> "Auto (Previous)"
+                    else -> enabledKeyboards.firstOrNull { it.id == savedId }?.label
+                        ?: "Fallback (Auto)"
+                }
+            }
             RealmeReadinessStrip(
                 readiness = readiness,
+                preferredReturnKeyboardLabel = preferredReturnKeyboardLabel,
+                hasPreferredReturnKeyboard = !aiConfig.preferredReturnImeId.isNullOrBlank(),
                 onOpenOverlaySettings = onOpenOverlaySettings,
                 onOpenBatterySettings = onOpenBatterySettings,
                 onOpenKeyboardSettings = onOpenKeyboardSettings,
                 onSwitchKeyboard = onSwitchKeyboard,
+                onPickReturnKeyboard = { showReturnKeyboardDialog = true },
             )
 
             // 4. Trigger Word Card (Phase 4 — pinned before every Copy & Insert)
@@ -253,7 +270,11 @@ fun PromptShiftHubScreen(
             // 8. Simple Countdown Timer Card (Phase 4)
             CountdownTimerCard(
                 timerState = timerState,
+                presetsSeconds = aiConfig.timerPresetsSeconds,
                 onStartTimer = onStartTimer,
+                onStartPreset = onStartTimerPreset,
+                onSavePreset = onSaveTimerPreset,
+                onRemovePreset = onRemoveTimerPreset,
                 onCancelTimer = onCancelTimer,
                 onResetTimer = onResetTimer,
                 onDismissAlert = onDismissTimerAlert,
@@ -337,6 +358,18 @@ fun PromptShiftHubScreen(
                 onSaveSnippet(id, title, body, includeTrigger)
                 showSnippetDialog = false
             },
+        )
+    }
+
+    if (showReturnKeyboardDialog) {
+        ReturnKeyboardPickerDialog(
+            selectedImeId = aiConfig.preferredReturnImeId,
+            enabledKeyboards = enabledKeyboards,
+            onSelect = { imeId ->
+                onSelectPreferredReturnIme(imeId)
+                showReturnKeyboardDialog = false
+            },
+            onDismiss = { showReturnKeyboardDialog = false },
         )
     }
 }
@@ -486,10 +519,13 @@ private fun HeroControlCard(
 @Composable
 private fun RealmeReadinessStrip(
     readiness: RealmeReadinessState,
+    preferredReturnKeyboardLabel: String,
+    hasPreferredReturnKeyboard: Boolean,
     onOpenOverlaySettings: () -> Unit,
     onOpenBatterySettings: () -> Unit,
     onOpenKeyboardSettings: () -> Unit,
     onSwitchKeyboard: () -> Unit,
+    onPickReturnKeyboard: () -> Unit,
 ) {
     Column(
         modifier = Modifier.fillMaxWidth(),
@@ -539,6 +575,126 @@ private fun RealmeReadinessStrip(
                 isReady = readiness.isPromptShiftKeyboardActive,
                 accentWhenPending = PromptShiftColors.TextMuted,
                 onClick = onSwitchKeyboard,
+            )
+        }
+        ReadinessChip(
+            modifier = Modifier.fillMaxWidth(),
+            title = "Return Keyboard (after Timer popup)",
+            statusText = "$preferredReturnKeyboardLabel →",
+            isReady = hasPreferredReturnKeyboard,
+            accentWhenPending = PromptShiftColors.TextMuted,
+            onClick = onPickReturnKeyboard,
+        )
+    }
+}
+
+@Composable
+private fun ReturnKeyboardPickerDialog(
+    selectedImeId: String?,
+    enabledKeyboards: List<EnabledKeyboardOption>,
+    onSelect: (String?) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    androidx.compose.material3.AlertDialog(
+        onDismissRequest = onDismiss,
+        containerColor = PromptShiftColors.CarbonSurface,
+        titleContentColor = PromptShiftColors.TextPrimary,
+        textContentColor = PromptShiftColors.TextMuted,
+        title = {
+            Text(
+                text = "Return Keyboard",
+                fontWeight = FontWeight.Bold,
+                fontSize = 16.sp,
+            )
+        },
+        text = {
+            Column(
+                modifier = Modifier.fillMaxWidth(),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                Text(
+                    text = "When the Timer popup closes while PromptShift Keyboard is active, switch back to:",
+                    color = PromptShiftColors.TextMuted,
+                    fontSize = 12.sp,
+                )
+
+                ReturnKeyboardOptionRow(
+                    label = "Auto (Previous Keyboard)",
+                    subtitle = "Safe default if your keyboard changes",
+                    selected = selectedImeId.isNullOrBlank(),
+                    onClick = { onSelect(null) },
+                )
+
+                enabledKeyboards.forEach { option ->
+                    ReturnKeyboardOptionRow(
+                        label = option.label,
+                        subtitle = null,
+                        selected = selectedImeId == option.id,
+                        onClick = { onSelect(option.id) },
+                    )
+                }
+
+                if (enabledKeyboards.isEmpty()) {
+                    Text(
+                        text = "No other enabled keyboards detected. Auto fallback will be used.",
+                        color = PromptShiftColors.TextMuted,
+                        fontSize = 11.5.sp,
+                    )
+                }
+            }
+        },
+        confirmButton = {
+            androidx.compose.material3.TextButton(onClick = onDismiss) {
+                Text("Close", color = PromptShiftColors.TextMuted)
+            }
+        },
+    )
+}
+
+@Composable
+private fun ReturnKeyboardOptionRow(
+    label: String,
+    subtitle: String?,
+    selected: Boolean,
+    onClick: () -> Unit,
+) {
+    val borderColor = if (selected) {
+        PromptShiftColors.CopiedEmerald.copy(alpha = 0.75f)
+    } else {
+        PromptShiftColors.MetalBorder
+    }
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(10.dp))
+            .background(if (selected) PromptShiftColors.CopiedEmeraldBg else PromptShiftColors.CarbonElevated)
+            .border(1.dp, borderColor, RoundedCornerShape(10.dp))
+            .clickable(onClick = onClick)
+            .padding(horizontal = 12.dp, vertical = 10.dp),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = label,
+                color = if (selected) PromptShiftColors.CopiedEmerald else PromptShiftColors.TextPrimary,
+                fontSize = 13.sp,
+                fontWeight = FontWeight.Bold,
+            )
+            if (!subtitle.isNullOrBlank()) {
+                Text(
+                    text = subtitle,
+                    color = PromptShiftColors.TextMuted,
+                    fontSize = 11.sp,
+                )
+            }
+        }
+        if (selected) {
+            Text(
+                text = "✓",
+                color = PromptShiftColors.CopiedEmerald,
+                fontSize = 14.sp,
+                fontWeight = FontWeight.ExtraBold,
             )
         }
     }

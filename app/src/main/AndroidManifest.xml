@@ -57,7 +57,7 @@
             android:launchMode="singleInstance"
             android:taskAffinity=""
             android:theme="@style/Theme.PromptShift.Dialog"
-            android:windowSoftInputMode="adjustResize|stateVisible" />
+            android:windowSoftInputMode="adjustResize" />
 
         <!-- 1-frame transparent trampoline for Android 10+ background clipboard read -->
         <activity

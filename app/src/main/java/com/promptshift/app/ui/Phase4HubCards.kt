@@ -8,6 +8,8 @@ import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -363,17 +365,24 @@ internal fun SnippetsAndRecentCard(
     }
 }
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 internal fun CountdownTimerCard(
     timerState: TimerState,
+    presetsSeconds: List<Int>,
     onStartTimer: (minutes: Int, seconds: Int) -> Unit,
+    onStartPreset: (totalSeconds: Int) -> Unit,
+    onSavePreset: (minutes: Int, seconds: Int) -> Boolean,
+    onRemovePreset: (totalSeconds: Int) -> Unit,
     onCancelTimer: () -> Unit,
     onResetTimer: () -> Unit,
     onDismissAlert: () -> Unit,
 ) {
     var minutesInput by remember { mutableStateOf("") }
     var secondsInput by remember { mutableStateOf("") }
-    var inlineError by remember { mutableStateOf<String?>(null) }
+    var inlineMessage by remember { mutableStateOf<String?>(null) }
+    var inlineIsError by remember { mutableStateOf(false) }
+    var isEditingPresets by remember { mutableStateOf(false) }
 
     CarbonCard {
         Row(
@@ -392,7 +401,7 @@ internal fun CountdownTimerCard(
                 text = when {
                     timerState.isRunning -> "RUNNING • ${timerState.formattedRemaining()}"
                     timerState.isFinished -> "DONE ⏱"
-                    else -> "Vibrate ~4s + Alert"
+                    else -> "Top-Left Pill + Alert"
                 },
                 color = when {
                     timerState.isRunning -> PromptShiftColors.CopiedEmerald
@@ -482,6 +491,79 @@ internal fun CountdownTimerCard(
                 Spacer(modifier = Modifier.height(10.dp))
             }
 
+            // Editable 1-tap Presets
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    text = if (isEditingPresets) "TAP PRESET TO REMOVE" else "PRESETS (1-TAP START)",
+                    color = if (isEditingPresets) PromptShiftColors.QuotaWarnRed else PromptShiftColors.TextMuted,
+                    fontSize = 10.5.sp,
+                    fontWeight = FontWeight.Bold,
+                    letterSpacing = 0.7.sp,
+                )
+                if (presetsSeconds.isNotEmpty()) {
+                    MiniActionChip(
+                        label = if (isEditingPresets) "Done" else "Edit",
+                        onClick = { isEditingPresets = !isEditingPresets },
+                    )
+                }
+            }
+
+            Spacer(modifier = Modifier.height(8.dp))
+
+            if (presetsSeconds.isEmpty()) {
+                Text(
+                    text = "No presets saved yet — enter Min/Sec below and tap + Save.",
+                    color = PromptShiftColors.TextMuted,
+                    fontSize = 11.5.sp,
+                )
+            } else {
+                FlowRow(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    presetsSeconds.forEach { totalSec ->
+                        val label = TimerState.formatPresetLabel(totalSec)
+                        val borderColor = if (isEditingPresets) {
+                            PromptShiftColors.QuotaWarnRed.copy(alpha = 0.75f)
+                        } else {
+                            PromptShiftColors.MetalBorder
+                        }
+                        Box(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(10.dp))
+                                .background(PromptShiftColors.CarbonElevated)
+                                .border(1.dp, borderColor, RoundedCornerShape(10.dp))
+                                .clickable {
+                                    if (isEditingPresets) {
+                                        onRemovePreset(totalSec)
+                                        if (presetsSeconds.size <= 1) {
+                                            isEditingPresets = false
+                                        }
+                                    } else {
+                                        onStartPreset(totalSec)
+                                    }
+                                }
+                                .padding(horizontal = 11.dp, vertical = 7.dp),
+                        ) {
+                            Text(
+                                text = if (isEditingPresets) "$label  ✕" else label,
+                                color = if (isEditingPresets) PromptShiftColors.QuotaWarnRed else PromptShiftColors.TextPrimary,
+                                fontFamily = FontFamily.Monospace,
+                                fontSize = 12.5.sp,
+                                fontWeight = FontWeight.Bold,
+                            )
+                        }
+                    }
+                }
+            }
+
+            Spacer(modifier = Modifier.height(10.dp))
+
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -491,7 +573,7 @@ internal fun CountdownTimerCard(
                     value = minutesInput,
                     onValueChange = { raw ->
                         minutesInput = raw.filter { it.isDigit() }.take(3)
-                        inlineError = null
+                        inlineMessage = null
                     },
                     label = { Text("Min", fontSize = 11.5.sp) },
                     placeholder = { Text("0", fontSize = 12.5.sp) },
@@ -505,7 +587,7 @@ internal fun CountdownTimerCard(
                     value = secondsInput,
                     onValueChange = { raw ->
                         secondsInput = raw.filter { it.isDigit() }.take(2)
-                        inlineError = null
+                        inlineMessage = null
                     },
                     label = { Text("Sec", fontSize = 11.5.sp) },
                     placeholder = { Text("00", fontSize = 12.5.sp) },
@@ -515,32 +597,72 @@ internal fun CountdownTimerCard(
                     colors = darkInputColors(),
                     shape = RoundedCornerShape(12.dp),
                 )
+            }
+
+            Spacer(modifier = Modifier.height(8.dp))
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                OutlinedButton(
+                    onClick = {
+                        val min = minutesInput.toIntOrNull() ?: 0
+                        val sec = secondsInput.toIntOrNull() ?: 0
+                        if (min == 0 && sec == 0) {
+                            inlineMessage = "Enter min or sec"
+                            inlineIsError = true
+                        } else if (onSavePreset(min, sec)) {
+                            val label = TimerState.formatPresetLabel(min.coerceIn(0, 999) * 60 + sec.coerceIn(0, 59))
+                            inlineMessage = "Saved preset $label"
+                            inlineIsError = false
+                        } else {
+                            inlineMessage = "Preset already exists"
+                            inlineIsError = true
+                        }
+                    },
+                    modifier = Modifier
+                        .weight(0.42f)
+                        .height(44.dp),
+                    shape = RoundedCornerShape(12.dp),
+                    border = BorderStroke(1.dp, PromptShiftColors.MetalBorder),
+                    colors = ButtonDefaults.outlinedButtonColors(
+                        containerColor = PromptShiftColors.CarbonElevated,
+                        contentColor = PromptShiftColors.TextPrimary,
+                    ),
+                ) {
+                    Text("+ Save", fontWeight = FontWeight.Bold)
+                }
+
                 Button(
                     onClick = {
                         val min = minutesInput.toIntOrNull() ?: 0
                         val sec = secondsInput.toIntOrNull() ?: 0
                         if (min == 0 && sec == 0) {
-                            inlineError = "Enter min or sec"
+                            inlineMessage = "Enter min or sec"
+                            inlineIsError = true
                         } else {
                             onStartTimer(min, sec)
                         }
                     },
-                    modifier = Modifier.height(52.dp),
+                    modifier = Modifier
+                        .weight(0.58f)
+                        .height(44.dp),
                     shape = RoundedCornerShape(12.dp),
                     colors = ButtonDefaults.buttonColors(
                         containerColor = PromptShiftColors.GtCrimson,
                         contentColor = PromptShiftColors.TextPrimary,
                     ),
                 ) {
-                    Text("Start", fontWeight = FontWeight.Bold)
+                    Text("Start Timer", fontWeight = FontWeight.Bold)
                 }
             }
 
-            if (!inlineError.isNullOrBlank()) {
+            if (!inlineMessage.isNullOrBlank()) {
                 Spacer(modifier = Modifier.height(6.dp))
                 Text(
-                    text = inlineError.orEmpty(),
-                    color = PromptShiftColors.QuotaWarnRed,
+                    text = inlineMessage.orEmpty(),
+                    color = if (inlineIsError) PromptShiftColors.QuotaWarnRed else PromptShiftColors.CopiedEmerald,
                     fontSize = 11.5.sp,
                     fontWeight = FontWeight.SemiBold,
                 )

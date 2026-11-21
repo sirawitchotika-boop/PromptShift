@@ -40,6 +40,7 @@ class MainActivity : ComponentActivity() {
             isIgnoringBatteryOptimizations = false,
         ),
     )
+    private var enabledKeyboardsState by mutableStateOf<List<EnabledKeyboardOption>>(emptyList())
 
     private var bannerMessageState by mutableStateOf<String?>(null)
     private var bannerIsErrorState by mutableStateOf(false)
@@ -131,6 +132,7 @@ class MainActivity : ComponentActivity() {
                     timerState = timerState,
                     isOverlayRunning = isOverlayRunning,
                     readiness = readinessState,
+                    enabledKeyboards = enabledKeyboardsState,
                     statusBanner = bannerMessageState,
                     statusBannerIsError = bannerIsErrorState,
                     testingProviderId = testingProviderId,
@@ -163,6 +165,15 @@ class MainActivity : ComponentActivity() {
                         } else {
                             RealmeReadinessHelper.showInputMethodPicker(this)
                         }
+                    },
+                    onSelectPreferredReturnIme = { imeId ->
+                        aiConfigRepository.setPreferredReturnImeId(imeId)
+                        val label = if (imeId.isNullOrBlank()) {
+                            "Auto (Previous)"
+                        } else {
+                            enabledKeyboardsState.firstOrNull { it.id == imeId }?.label ?: "Selected keyboard"
+                        }
+                        showBanner("Return keyboard: $label", isError = false)
                     },
                     onLoadFromClipboard = {
                         val raw = ClipboardHelper.readPlainText(this)
@@ -309,6 +320,19 @@ class MainActivity : ComponentActivity() {
                             showBanner("Timer started (${"%02d:%02d".format(min, sec)})", isError = false)
                         }
                     },
+                    onStartTimerPreset = { totalSeconds ->
+                        if (timerManager.startTotalSeconds(totalSeconds)) {
+                            val label = com.promptshift.app.timer.TimerState.formatPresetLabel(totalSeconds)
+                            showBanner("Timer started ($label)", isError = false)
+                        }
+                    },
+                    onSaveTimerPreset = { min, sec ->
+                        aiConfigRepository.addTimerPreset(min, sec)
+                    },
+                    onRemoveTimerPreset = { totalSeconds ->
+                        aiConfigRepository.removeTimerPreset(totalSeconds)
+                        showBanner("Timer preset removed", isError = false)
+                    },
                     onCancelTimer = {
                         timerManager.cancel()
                         showBanner("Timer cancelled", isError = false)
@@ -375,6 +399,7 @@ class MainActivity : ComponentActivity() {
 
     private fun refreshReadiness() {
         readinessState = RealmeReadinessHelper.checkState(this)
+        enabledKeyboardsState = RealmeReadinessHelper.getOtherEnabledKeyboards(this)
     }
 
     private fun handleStartBubbleRequest(onNeedOverlayPermission: () -> Unit) {

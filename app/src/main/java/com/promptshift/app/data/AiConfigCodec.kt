@@ -18,6 +18,8 @@ data class PersistedAiConfig(
     val triggerWordEnabled: Boolean = false,
     val snippets: List<PromptSnippet> = emptyList(),
     val recentPrompts: List<String> = emptyList(),
+    val timerPresetsSeconds: List<Int>? = null,
+    val preferredReturnImeId: String? = null,
 )
 
 data class SafeBackupFavoriteModels(
@@ -106,7 +108,18 @@ object AiConfigCodec {
             if (idx > 0) sb.append(',')
             appendJsonString(sb, recent)
         }
-        sb.append("]}")
+        sb.append("]")
+        if (config.timerPresetsSeconds != null) {
+            sb.append(",\"timerPresetsSeconds\":[")
+            config.timerPresetsSeconds.forEachIndexed { idx, sec ->
+                if (idx > 0) sb.append(',')
+                sb.append(sec)
+            }
+            sb.append(']')
+        }
+        sb.append(",\"preferredReturnImeId\":")
+        appendNullableString(sb, config.preferredReturnImeId)
+        sb.append('}')
         return sb.toString()
     }
 
@@ -185,6 +198,20 @@ object AiConfigCodec {
                 ?.take(10)
                 ?: emptyList()
 
+            val timerPresetsSeconds = if (root.containsKey("timerPresetsSeconds")) {
+                (root["timerPresetsSeconds"] as? List<*>)
+                    ?.mapNotNull { (it as? Number)?.toInt()?.takeIf { sec -> sec in 1..59_999 } }
+                    ?.distinct()
+                    ?.sorted()
+                    ?: emptyList()
+            } else {
+                null
+            }
+
+            val preferredReturnImeId = (root["preferredReturnImeId"] as? String)
+                ?.trim()
+                ?.takeIf { it.isNotEmpty() }
+
             PersistedAiConfig(
                 providers = providers,
                 activeProviderId = activeProviderId,
@@ -197,6 +224,8 @@ object AiConfigCodec {
                 triggerWordEnabled = triggerWordEnabled,
                 snippets = snippets,
                 recentPrompts = recentPrompts,
+                timerPresetsSeconds = timerPresetsSeconds,
+                preferredReturnImeId = preferredReturnImeId,
             )
         } catch (_: Exception) {
             null
