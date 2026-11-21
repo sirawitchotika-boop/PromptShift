@@ -7,6 +7,7 @@ import com.promptshift.app.domain.OverlayFeedback
 import com.promptshift.app.domain.OverlayUiState
 import com.promptshift.app.domain.PromptBatchParser
 import com.promptshift.app.domain.PromptBatchState
+import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
@@ -44,10 +45,15 @@ interface PromptBatchRepository {
 
 class DefaultPromptBatchRepository(
     private val persistence: BatchPersistence,
+    persistDispatcher: CoroutineDispatcher? = null,
 ) : PromptBatchRepository {
 
     private val lock = Any()
     private val feedbackSeq = AtomicLong(0L)
+    private val snapshotWriter = AsyncSnapshotWriter<PersistedBatchSnapshot>(
+        dispatcher = persistDispatcher,
+        writeAction = { snapshot -> persistence.save(snapshot) },
+    )
 
     private val _batchState: MutableStateFlow<PromptBatchState>
     private val _overlayState: MutableStateFlow<OverlayUiState>
@@ -278,7 +284,7 @@ class DefaultPromptBatchRepository(
         val batch = _batchState.value
         val overlay = _overlayState.value
         val ime = _imePrefs.value
-        persistence.save(
+        snapshotWriter.enqueue(
             PersistedBatchSnapshot(
                 prompts = batch.prompts,
                 currentIndex = batch.currentIndex,

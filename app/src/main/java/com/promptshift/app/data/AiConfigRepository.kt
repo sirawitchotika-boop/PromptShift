@@ -8,6 +8,7 @@ import com.promptshift.app.domain.PromptTextComposer
 import com.promptshift.app.domain.ProviderProfile
 import com.promptshift.app.domain.ReasoningEffort
 import com.promptshift.app.domain.SafeBackupImportResult
+import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -106,9 +107,14 @@ interface AiConfigRepository {
 class DefaultAiConfigRepository(
     private val persistence: AiConfigPersistence,
     private val apiKeyStore: ApiKeyStore,
+    persistDispatcher: CoroutineDispatcher? = null,
 ) : AiConfigRepository {
 
     private val lock = Any()
+    private val snapshotWriter = AsyncSnapshotWriter<PersistedAiConfig>(
+        dispatcher = persistDispatcher,
+        writeAction = { config -> persistence.save(config) },
+    )
     private val _configState: MutableStateFlow<AiConfigState>
     override val configState: StateFlow<AiConfigState>
 
@@ -663,7 +669,7 @@ class DefaultAiConfigRepository(
 
     private fun persistLocked() {
         val state = _configState.value
-        persistence.save(
+        snapshotWriter.enqueue(
             PersistedAiConfig(
                 providers = state.providers.map { it.copy(hasApiKey = false) },
                 activeProviderId = state.activeProviderId,

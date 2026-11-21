@@ -17,6 +17,7 @@ import com.promptshift.app.data.FileBatchPersistence
 import com.promptshift.app.data.PromptBatchRepository
 import com.promptshift.app.overlay.TopLeftTimerPillController
 import com.promptshift.app.timer.CountdownTimerManager
+import com.promptshift.app.timer.TimerAlarmScheduler
 import com.promptshift.app.timer.TimerAlertNotifier
 import com.promptshift.app.ui.MainActivity
 import com.promptshift.app.ui.TimerPopupActivity
@@ -57,12 +58,16 @@ class PromptShiftApp : Application() {
     override fun onCreate() {
         super.onCreate()
         val batchFile = File(filesDir, "promptshift_state.json")
-        repository = DefaultPromptBatchRepository(FileBatchPersistence(batchFile))
+        repository = DefaultPromptBatchRepository(
+            persistence = FileBatchPersistence(batchFile),
+            persistDispatcher = Dispatchers.IO,
+        )
 
         val aiConfigFile = File(filesDir, "promptshift_ai_config.json")
         aiConfigRepository = DefaultAiConfigRepository(
             persistence = FileAiConfigPersistence(aiConfigFile),
             apiKeyStore = AndroidKeystoreApiKeyStore(this),
+            persistDispatcher = Dispatchers.IO,
         )
 
         generationCoordinator = GenerationCoordinator(
@@ -79,11 +84,14 @@ class PromptShiftApp : Application() {
             appScope = appScope,
             onTimerStarted = { targetEndMs ->
                 TimerAlertNotifier.showRunningNotification(this, targetEndMs)
+                TimerAlarmScheduler.scheduleWakeup(this, targetEndMs)
             },
             onTimerCancelled = {
                 TimerAlertNotifier.cancelRunningNotification(this)
+                TimerAlarmScheduler.cancelWakeup(this)
             },
             onTimerFinished = {
+                TimerAlarmScheduler.cancelWakeup(this)
                 TimerAlertNotifier.triggerTimerDoneAlert(this)
                 repository.postFeedback("Timer Done! ⏱", isError = false)
             },
