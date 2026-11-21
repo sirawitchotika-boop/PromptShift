@@ -9,6 +9,7 @@ import android.os.Build
 import android.os.VibrationEffect
 import android.os.Vibrator
 import android.os.VibratorManager
+import android.util.Log
 import androidx.core.app.NotificationCompat
 import com.promptshift.app.R
 import com.promptshift.app.ui.MainActivity
@@ -19,6 +20,8 @@ import com.promptshift.app.ui.TimerPopupActivity
  * "PromptShift Timer Done" notification, and silent ongoing countdown notification in the shade.
  */
 object TimerAlertNotifier {
+
+    private const val TAG = "PromptShiftTimerAlert"
 
     const val TIMER_CHANNEL_ID = "promptshift_timer_alert_channel"
     const val TIMER_RUNNING_CHANNEL_ID = "promptshift_timer_running_channel_v2"
@@ -92,7 +95,8 @@ object TimerAlertNotifier {
                 .build()
 
             manager.notify(TIMER_RUNNING_NOTIFICATION_ID, notification)
-        } catch (_: Exception) {
+        } catch (e: Exception) {
+            Log.w(TAG, "Unable to show running timer notification", e)
         }
     }
 

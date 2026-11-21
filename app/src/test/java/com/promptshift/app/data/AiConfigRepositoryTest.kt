@@ -172,6 +172,7 @@ class AiConfigRepositoryTest {
         sourceRepo.saveInstruction(null, "Cinematic", "Moody lighting")
         sourceRepo.saveSnippet(null, "Quality", "8k ultra detailed", includeTriggerWord = false)
         sourceRepo.addTriggerWordChip("ohwx woman")
+        sourceRepo.addTimerPreset(7, 30)
 
         val backupJson = sourceRepo.exportSafeBackupJson()
         assertTrue(backupJson.contains(AiConfigCodec.EXPORT_FORMAT_TAG_V2))
@@ -192,6 +193,7 @@ class AiConfigRepositoryTest {
                 snippetsCount = 1,
                 triggerWordsCount = 1,
                 favoriteModelsCount = 2,
+                timerPresetsCount = 4,
             ),
             result,
         )
@@ -202,6 +204,7 @@ class AiConfigRepositoryTest {
             listOf("openai/gpt-4o-mini", "google/gemini-2.5-pro"),
             targetRepo.configState.value.activeProvider?.favoriteModels,
         )
+        assertEquals(listOf(60, 180, 300, 450), targetRepo.configState.value.timerPresetsSeconds)
 
         // Backward compatibility: v1 instructions-only JSON still imports via importSafeBackupJson
         val v1Json = sourceRepo.exportInstructionsJson()
@@ -211,7 +214,7 @@ class AiConfigRepositoryTest {
         )
         val v1Res = v1Target.importSafeBackupJson(v1Json)
         assertEquals(
-            com.promptshift.app.domain.SafeBackupImportResult.Imported(1, 0, 0, 0),
+            com.promptshift.app.domain.SafeBackupImportResult.Imported(1, 0, 0, 0, 0),
             v1Res,
         )
     }

@@ -37,6 +37,7 @@ data class SafeBackupPayload(
     val snippets: List<PromptSnippet> = emptyList(),
     val triggerWords: List<String> = emptyList(),
     val favoriteModels: List<SafeBackupFavoriteModels> = emptyList(),
+    val timerPresetsSeconds: List<Int> = emptyList(),
 )
 
 /**
@@ -358,6 +359,11 @@ object AiConfigCodec {
             sb.append("]\n    }")
         }
         if (payload.favoriteModels.isNotEmpty()) sb.append("\n  ")
+        sb.append("],\n  \"timerPresetsSeconds\": [")
+        payload.timerPresetsSeconds.forEachIndexed { idx, sec ->
+            if (idx > 0) sb.append(", ")
+            sb.append(sec)
+        }
         sb.append("]\n}\n")
         return sb.toString()
     }
@@ -374,8 +380,9 @@ object AiConfigCodec {
             val rawSnippets = map["snippets"] as? List<*>
             val rawTriggers = map["triggerWords"] as? List<*>
             val rawFavModels = map["favoriteModels"] as? List<*>
+            val rawTimerPresets = map["timerPresetsSeconds"] as? List<*>
 
-            if (rawProfiles == null && rawSnippets == null && rawTriggers == null && rawFavModels == null) {
+            if (rawProfiles == null && rawSnippets == null && rawTriggers == null && rawFavModels == null && rawTimerPresets == null) {
                 return null
             }
 
@@ -415,11 +422,18 @@ object AiConfigCodec {
                 }
             } ?: emptyList()
 
+            val timerPresetsSeconds = rawTimerPresets
+                ?.mapNotNull { (it as? Number)?.toInt()?.takeIf { sec -> sec in 1..59_999 } }
+                ?.distinct()
+                ?.sorted()
+                ?: emptyList()
+
             SafeBackupPayload(
                 instructions = instructions,
                 snippets = snippets,
                 triggerWords = triggerWords,
                 favoriteModels = favoriteModels,
+                timerPresetsSeconds = timerPresetsSeconds,
             )
         } catch (_: Exception) {
             null
